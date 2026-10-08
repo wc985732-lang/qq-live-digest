@@ -192,9 +192,18 @@ def command_decisions(args: argparse.Namespace) -> int:
             print(line)
         return 0
 
-    counts = store.decision_counts(hours=args.hours or 24)
-    if counts:
-        print(f"最近 {args.hours or 24} 小时的决策分布：" + decisions.summarise_counts(counts))
+    hours = args.hours or 24
+    final_counts, undecided = decisions.split_counts(store.decision_counts(hours=hours))
+    if final_counts:
+        print(f"最近 {hours} 小时的已决分布：" + decisions.summarise_counts(final_counts))
+    deferred = int(undecided.get(decisions.DEFERRED) or 0)
+    if deferred:
+        print(
+            f"另有 {deferred} 条「延后未决」：本该推送，但被夜间静默 / 当日额度 / 大模型失败推迟，"
+            "下个窗口会再试。"
+        )
+        print("  看明细：main.py decisions --outcome deferred")
+    if final_counts or deferred:
         print()
     rows = store.recent_decisions(limit=args.limit or 20, outcome=args.outcome or "")
     if not rows:

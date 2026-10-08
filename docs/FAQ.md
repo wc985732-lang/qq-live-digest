@@ -93,13 +93,17 @@ Agent 属于未来的**上层可选能力**，不会反过来接管底层消息�
 ```powershell
 .\.venv\Scripts\python.exe main.py decisions --limit 20          # 最近 20 条的结论
 .\.venv\Scripts\python.exe main.py decisions --msg-id <msg_id>   # 某一条的完整轨迹
+.\.venv\Scripts\python.exe main.py decisions --outcome deferred  # 只见「延后未决」的那批
 ```
 
 每条消息会留下一条最终结论——`pushed`（已推）/ `held`（进了摘要但没投出去）/ `filtered`（未命中）/
 `deduped`（重复跳过）/ `truncated`（超出每批上限）/ `duplicate`、`rejected`（入口就挡下）。
 `reason` 里带**当时的分值和阈值**（例如「分值 2 < 阈值 3」），所以后来改了配置也解释得通。
 
-注意：被限流或还没到合并窗口时，消息只是「尚未决定」，不会留结论行。等窗口到了才会写。
+如果它本该推送、却被**夜间静默 / 当日额度用尽 / 大模型失败**挡住，会显示成 `deferred`（延后未决）：
+这是过程态而不是最终结论，下个窗口会自动再试；等它真的推出去或被最终挡下，这条就会被覆盖掉。
+
+注意：还没到合并窗口的消息只是「尚未决定」，一行都不会留（避免每分钟刷噪声）。等窗口到了才写。
 
 ---
 

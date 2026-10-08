@@ -23,16 +23,21 @@ DEDUPED = "deduped"      # 与最近已推内容或同批另一条重复
 TRUNCATED = "truncated"  # 命中但超出每批条数上限
 DUPLICATE = "duplicate"  # msg_id 重复，未入库
 REJECTED = "rejected"    # 入口拒绝：没有 msg_id，或群不在白名单
+DEFERRED = "deferred"    # 本该推送，但被夜间静默 / 当日额度 / 大模型失败推迟，还没有最终结论
 
-OUTCOMES = (PENDING, PUSHED, HELD, FILTERED, DEDUPED, TRUNCATED, DUPLICATE, REJECTED)
+OUTCOMES = (PENDING, PUSHED, HELD, DEFERRED, FILTERED, DEDUPED, TRUNCATED, DUPLICATE, REJECTED)
 
 # 「为什么没推」——查询时最常问的几个
 NEGATIVE_OUTCOMES = (FILTERED, DEDUPED, TRUNCATED, REJECTED, DUPLICATE)
+
+# 「还没落定」——这些行是暂态，后面会被同一批 / 下一次 tick 覆盖成最终结论
+UNDECIDED_OUTCOMES = (PENDING, DEFERRED)
 
 OUTCOME_LABELS = {
     PENDING: "待投递",
     PUSHED: "已推送",
     HELD: "未投出",
+    DEFERRED: "延后未决",
     FILTERED: "未命中",
     DEDUPED: "重复跳过",
     TRUNCATED: "超出上限",
@@ -72,6 +77,22 @@ def rule_hits(analysis: Mapping[str, Any], *, limit: int = 3) -> list[str]:
 def outcome_label(outcome: str) -> str:
     value = str(outcome or "")
     return OUTCOME_LABELS.get(value, value or "未知")
+
+
+def is_final(outcome: str) -> bool:
+    """这条结论算不算最终决定？「待投递 / 延后未决」只是过程态，不算。"""
+    value = str(outcome or "")
+    return value in OUTCOMES and value not in UNDECIDED_OUTCOMES
+
+
+def split_counts(counts: Mapping[str, int]) -> tuple[dict[str, int], dict[str, int]]:
+    """把 outcome→条数 拆成（已决, 未决）两组，供 CLI 分开显示。"""
+    final: dict[str, int] = {}
+    undecided: dict[str, int] = {}
+    for key, value in counts.items():
+        bucket = undecided if str(key) in UNDECIDED_OUTCOMES else final
+        bucket[str(key)] = int(value)
+    return final, undecided
 
 
 def summarise_counts(counts: Mapping[str, int]) -> str:

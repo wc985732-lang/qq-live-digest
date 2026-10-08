@@ -29,6 +29,12 @@ PRUNE_INTERVAL_SECONDS = 6 * 3600
 FORCE_FLUSH_MULTIPLIER = 6
 CATCHUP_RETRY_SECONDS = 5 * 60
 
+# 推送闸门给出的原因码 → 给人看的话术（决策日志里用）
+GATE_REASON_TEXT = {
+    "quiet_hours": "夜间静默时段",
+    "daily_budget": "当日推送额度已用完",
+}
+
 
 class DigestService:
     def __init__(
@@ -312,6 +318,48 @@ class DigestService:
         self.last_defer_reason = reason
         self.last_defer_at = stamp
         self.logger.info("本批 %d 条消息暂不推送（%s），留到下次窗口。", count, reason)
+
+    def _record_deferred(
+        self,
+        items: list[dict[str, Any]],
+        reason: str,
+        *,
+        msg_ids: set[str] | None = None,
+        stage: str = decisions.STAGE_PUBLISH,
+        when: dt.datetime | None = None,
+    ) -> int:
+        """记「本该推送，但这次被推迟」的过程行（按 msg_id 就地更新，不涨行）。
+
+        补上 A33 决策日志此前整段空白的那一块：被夜间静默 / 当日额度 / 大模型失败挡住的消息
+        以前不留任何痕迹，而夜间恰恰是最常见的场景——于是日志看起来像"什么都没发生"。
+        `items` 既可以是分析结果，也可以是 digest 里的候选行，两边字段是同一套命名。
+        """
+        text = GATE_REASON_TEXT.get(reason, reason)
+        rows: list[dict[str, Any]] = []
+        for item in items or []:
+            msg_id = str(item.get("msg_id") or "")
+            if not msg_id or (msg_ids is not None and msg_id not in msg_ids):
+                continue
+            rows.append(
+                {
+                    "msg_id": msg_id,
+                    "group_id": str(item.get("group_id") or ""),
+                    "stage": str(item.get("stage") or stage),
+                    "reason": f"延后：{text}",
+                    "score": int(item.get("score") or 0),
+                    "min_score": int(item.get("min_score") or self.settings.min_score or 0),
+                    "category": str(item.get("category") or ""),
+                    "rule_hits": item.get("rule_hits") or decisions.rule_hits(item),
+                    "created_at": iso(when or now_local()),
+                }
+            )
+        if not rows:
+            return 0
+        try:
+            return int(self.store.record_deferred(rows))
+        except Exception:  # noqa: BLE001 - 旁路观测，写不进去也绝不拖垮消息链路
+            self.logger.debug("延后决策写入失败", exc_info=True)
+            return 0
 
     # --------------------------------------------------------------- 生命周期
     def start(self, *, start_bot: bool = True) -> None:
@@ -762,6 +810,12 @@ class DigestService:
                     return produced
             else:
                 self._hold_batch(stamp, len(immediate_records), reason)
+                self._record_deferred(
+                    analyses,
+                    reason,
+                    msg_ids={record["msg_id"] for record in immediate_records},
+                    when=stamp,
+                )
 
         oldest = parse_iso(records[0].get("received_at")) or stamp
         elapsed = (stamp - oldest).total_seconds()
@@ -773,6 +827,9 @@ class DigestService:
         allowed, reason = self._push_gate(stamp)
         if not allowed:
             self._hold_batch(stamp, len(records), reason)
+            self._record_deferred(
+                analyses, reason, msg_ids={record["msg_id"] for record in records}, when=stamp
+            )
             self._retry()
             return produced
 
@@ -837,6 +894,15 @@ class DigestService:
                     stamp,
                     digest.message_count,
                     f"大模型失败，稍后重试：{digest.llm_error}",
+                )
+                self._record_deferred(
+                    [
+                        row
+                        for row in (digest.decisions or [])
+                        if str(row.get("outcome") or "") == decisions.PENDING
+                    ],
+                    "大模型失败，稍后重试",
+                    when=stamp,
                 )
                 return False
             self._bump_meta_counter("llm_fallbacks_total")

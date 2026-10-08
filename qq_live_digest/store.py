@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
+from . import decisions
 from .timeutil import iso, now_local, parse_iso
 
 LOGGER = logging.getLogger(__name__)
@@ -302,6 +303,7 @@ class Store:
         """
         stamp = iso(now_local())
         prepared: list[tuple[Any, ...]] = []
+        superseded: dict[str, None] = {}
         for row in rows:
             if not isinstance(row, dict):
                 continue
@@ -309,6 +311,9 @@ class Store:
             msg_id = str(row.get("msg_id") or "")
             if not outcome and not msg_id:
                 continue
+            stage = str(row.get("stage") or "")
+            if decisions.is_final(outcome) and msg_id:
+                superseded[msg_id] = None
             hits = row.get("rule_hits") or []
             if not isinstance(hits, str):
                 hits = json.dumps([str(item) for item in hits], ensure_ascii=False)
@@ -317,7 +322,7 @@ class Store:
                     msg_id,
                     str(row.get("group_id") or ""),
                     _as_int(row.get("digest_id")),
-                    str(row.get("stage") or ""),
+                    stage,
                     outcome,
                     str(row.get("reason") or ""),
                     _as_int(row.get("score")),
@@ -340,6 +345,13 @@ class Store:
                 """,
                 prepared,
             )
+            if superseded:
+                # 一条消息一旦有了最终结论，它之前的「延后未决」过程行就该消失，
+                # 否则同一条消息会既显示"延后"又显示"已推送"，查询时自相矛盾。
+                connection.executemany(
+                    "DELETE FROM decisions WHERE outcome = ? AND msg_id = ?",
+                    [(decisions.DEFERRED, msg_id) for msg_id in superseded],
+                )
         return len(prepared)
 
     def decisions_for(self, msg_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
@@ -371,6 +383,127 @@ class Store:
                 (cutoff,),
             ).fetchall()
         return {str(row["outcome"] or "unknown"): int(row["total"] or 0) for row in rows}
+
+    def record_deferred(self, rows: Iterable[dict[str, Any]]) -> int:
+        """写入 / 刷新「延后未决」过程行。
+
+        同一条消息在每个 tick 都可能被推迟一次（夜间静默会持续好几个小时），所以这里按
+        `msg_id` **就地更新**为最新原因，而不是每次插一行——否则一晚就能把表撑爆。
+        消息一旦拿到最终结论，`record_decisions` 会把这些过程行清掉。
+        """
+        stamp = iso(now_local())
+        prepared: list[tuple[Any, ...]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            msg_id = str(row.get("msg_id") or "")
+            if not msg_id:
+                continue
+            hits = row.get("rule_hits") or []
+            if not isinstance(hits, str):
+                hits = json.dumps([str(item) for item in hits], ensure_ascii=False)
+            prepared.append(
+                (
+                    msg_id,
+                    str(row.get("group_id") or ""),
+                    _as_int(row.get("digest_id")),
+                    str(row.get("stage") or decisions.STAGE_PUBLISH),
+                    str(row.get("reason") or ""),
+                    _as_int(row.get("score")),
+                    _as_int(row.get("min_score")),
+                    str(row.get("category") or ""),
+                    hits,
+                    iso(row.get("created_at") or stamp),
+                )
+            )
+        if not prepared:
+            return 0
+        touched = 0
+        with self._connect() as connection:
+            for (
+                msg_id,
+                group_id,
+                digest_id,
+                stage,
+                reason,
+                score,
+                min_score,
+                category,
+                hits,
+                created_at,
+            ) in prepared:
+                cursor = connection.execute(
+                    """
+                    UPDATE decisions
+                       SET group_id = ?, digest_id = ?, stage = ?, reason = ?, score = ?,
+                           min_score = ?, category = ?, rule_hits = ?, dedupe_reason = '',
+                           created_at = ?
+                     WHERE msg_id = ? AND outcome = ?
+                    """,
+                    (
+                        group_id,
+                        digest_id,
+                        stage,
+                        reason,
+                        score,
+                        min_score,
+                        category,
+                        hits,
+                        created_at,
+                        msg_id,
+                        decisions.DEFERRED,
+                    ),
+                )
+                if cursor.rowcount:
+                    touched += 1
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO decisions
+                        (msg_id, group_id, digest_id, stage, outcome, reason, score, min_score,
+                         category, rule_hits, dedupe_reason, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)
+                    """,
+                    (
+                        msg_id,
+                        group_id,
+                        digest_id,
+                        stage,
+                        decisions.DEFERRED,
+                        reason,
+                        score,
+                        min_score,
+                        category,
+                        hits,
+                        created_at,
+                    ),
+                )
+                touched += 1
+        return touched
+
+    def deferred_decisions(self, *, limit: int = 30, hours: int = 24) -> list[dict[str, Any]]:
+        """当前还「延后未决」的消息（新 → 旧）。"""
+        cutoff = iso(now_local() - dt.timedelta(hours=max(1, int(hours))))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM decisions
+                 WHERE outcome = ? AND created_at >= ?
+                 ORDER BY created_at DESC, id DESC
+                 LIMIT ?
+                """,
+                (decisions.DEFERRED, cutoff, max(1, int(limit))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def deferred_count(self, *, hours: int = 24) -> int:
+        cutoff = iso(now_local() - dt.timedelta(hours=max(1, int(hours))))
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM decisions WHERE outcome = ? AND created_at >= ?",
+                (decisions.DEFERRED, cutoff),
+            ).fetchone()
+        return int(row[0] or 0) if row else 0
 
     def oldest_unprocessed(self) -> str:
         with self._connect() as connection:
@@ -1172,8 +1305,8 @@ class Store:
 
     def counts(self) -> dict[str, int]:
         with self._connect() as connection:
-            def scalar(sql: str) -> int:
-                row = connection.execute(sql).fetchone()
+            def scalar(sql: str, *params: Any) -> int:
+                row = connection.execute(sql, params).fetchone()
                 return int(row[0] or 0)
 
             return {
@@ -1183,6 +1316,9 @@ class Store:
                 ),
                 "digests": scalar("SELECT COUNT(*) FROM digests"),
                 "decisions": scalar("SELECT COUNT(*) FROM decisions"),
+                "decisions_deferred": scalar(
+                    "SELECT COUNT(*) FROM decisions WHERE outcome = ?", decisions.DEFERRED
+                ),
                 "deliveries_sent": scalar("SELECT COUNT(*) FROM deliveries WHERE status='sent'"),
                 "deliveries_failed": scalar("SELECT COUNT(*) FROM deliveries WHERE status='failed'"),
             }

@@ -235,6 +235,40 @@ class StoreDecisionTest(unittest.TestCase):
         remaining = self.store.recent_decisions()
         self.assertEqual([row["msg_id"] for row in remaining], ["new"])
 
+    def test_deferred_updates_in_place_instead_of_appending(self) -> None:
+        """夜间静默一晚上要 tick 几百次，绝不能每次都插一行。"""
+        base = {"msg_id": "m1", "group_id": "g1", "stage": decisions.STAGE_PUBLISH}
+        self.assertEqual(self.store.record_deferred([{**base, "reason": "延后：夜间静默时段"}]), 1)
+        self.assertEqual(
+            self.store.record_deferred([{**base, "reason": "延后：当日推送额度已用完"}]), 1
+        )
+        rows = self.store.deferred_decisions()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["outcome"], decisions.DEFERRED)
+        self.assertIn("额度", rows[0]["reason"])
+        self.assertEqual(self.store.counts()["decisions_deferred"], 1)
+
+    def test_final_decision_clears_the_deferred_row(self) -> None:
+        """消息真正推出去之后，「延后未决」过程行必须消失，否则查出来自相矛盾。"""
+        self.store.record_deferred([{"msg_id": "m1", "reason": "延后：夜间静默时段"}])
+        self.assertEqual(self.store.deferred_count(), 1)
+        self.store.record_decisions(
+            [
+                {
+                    "msg_id": "m1",
+                    "stage": decisions.STAGE_PUBLISH,
+                    "outcome": decisions.PUSHED,
+                    "reason": "命中候选，已推送",
+                }
+            ]
+        )
+        self.assertEqual(self.store.deferred_count(), 0)
+        self.assertEqual([row["outcome"] for row in self.store.decisions_for("m1")], [decisions.PUSHED])
+
+    def test_deferred_ignores_rows_without_msg_id(self) -> None:
+        self.assertEqual(self.store.record_deferred([{}, {"reason": "没有消息号"}]), 0)
+        self.assertEqual(self.store.deferred_count(), 0)
+
 
 class _RecordingPusher(Pusher):
     name = "webhook"
@@ -323,6 +357,63 @@ class ServiceDecisionTest(unittest.TestCase):
         self.service.on_message(make_record("m1", NOTICE, minutes_ago=11))
         self.service.tick(now=NOW)
         self.assertGreaterEqual(self.store.counts()["decisions"], 1)
+
+    def _quiet_service(self) -> DigestService:
+        """静默时段覆盖 18:00，用来复现「夜里被挡住却什么都不留痕」那一段。"""
+        settings = Settings(
+            group_whitelist=("g1",),
+            group_aliases={"g1": "学院通知群"},
+            data_dir=self.data_dir,
+            window_minutes=10,
+            min_score=3,
+            quiet_hours="17:00-19:00",
+            catchup_enabled=False,
+            delivery_retry_seconds=0,
+        )
+        return DigestService(settings, store=self.store, pushers=[self.pusher])
+
+    def test_quiet_hours_records_deferred_instead_of_no_trace(self) -> None:
+        service = self._quiet_service()
+        service.on_message(make_record("m1", NOTICE, minutes_ago=11))
+        service.tick(now=NOW)
+        self.assertEqual(self.pusher.calls, [])
+        rows = self.store.deferred_decisions()
+        self.assertEqual([row["msg_id"] for row in rows], ["m1"])
+        self.assertEqual(rows[0]["outcome"], decisions.DEFERRED)
+        self.assertIn("延后", rows[0]["reason"])
+        self.assertIn("夜间静默", rows[0]["reason"])
+        self.assertEqual(self.store.counts()["decisions_deferred"], 1)
+
+    def test_deferred_message_is_pushed_once_the_quiet_window_ends(self) -> None:
+        service = self._quiet_service()
+        service.on_message(make_record("m1", NOTICE, minutes_ago=11))
+        service.tick(now=NOW)
+        self.assertEqual(self.store.deferred_count(), 1)
+        service.tick(now=NOW + dt.timedelta(hours=1, minutes=5))
+        self.assertEqual(len(self.pusher.calls), 1)
+        self.assertEqual(self.store.deferred_count(), 0)
+        self.assertEqual(self.store.decisions_for("m1")[0]["outcome"], decisions.PUSHED)
+
+    def test_daily_budget_exhaustion_is_recorded_as_deferred(self) -> None:
+        settings = Settings(
+            group_whitelist=("g1",),
+            group_aliases={"g1": "学院通知群"},
+            data_dir=self.data_dir,
+            window_minutes=10,
+            min_score=3,
+            quiet_hours="",
+            push_daily_budget=1,
+            catchup_enabled=False,
+            delivery_retry_seconds=0,
+        )
+        service = DigestService(settings, store=self.store, pushers=[self.pusher])
+        self.store.meta_set(f"push_budget:{NOW:%Y-%m-%d}", "1")
+        service.on_message(make_record("m1", NOTICE, minutes_ago=11))
+        service.tick(now=NOW)
+        self.assertEqual(self.pusher.calls, [])
+        row = self.store.deferred_decisions()[0]
+        self.assertEqual(row["outcome"], decisions.DEFERRED)
+        self.assertIn("额度", row["reason"])
 
 
 class RenderingTest(unittest.TestCase):

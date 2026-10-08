@@ -103,6 +103,9 @@ cd <项目目录>
 
 # 只查某一条消息的完整决策轨迹
 .\.venv\Scripts\python.exe main.py decisions --msg-id <msg_id>
+
+# 只查「延后未决」：本该推、但被夜间静默 / 额度 / 大模型失败推迟的
+.\.venv\Scripts\python.exe main.py decisions --outcome deferred
 ```
 
 ### 决策日志 `main.py decisions`
@@ -116,10 +119,18 @@ cd <项目目录>
 | `filtered` | 被本地规则挡下，`reason` 会写清是阈值、闲聊还是安静群 |
 | `deduped` | 与最近几小时已推内容重复，或与本批另一条要点相同（`dedupe_reason` 给出对照文本） |
 | `truncated` | 命中但超出 `QQ_DIGEST_MAX_ITEMS` 上限 |
+| `deferred` | 本该推送，但被夜间静默 / 当日额度 / 大模型失败推迟；**过程态**，下个窗口会再试 |
 | `duplicate` / `rejected` | 入口就挡下了：`msg_id` 重复，或群不在白名单 |
 
 `reason` 里带着**当时的分值和阈值**（例如「分值 2 < 阈值 3」），所以改了配置之后旧记录依然解释得通。
-被限流或还没到窗口时消息只是「尚未决定」，不会留下结论行——这一点是刻意的，避免每分钟刷一行噪声。
+
+`deferred` 与其他结论的区别在于它是**过程态**：消息还没落定，所以这条会按 `msg_id` 就地更新（夜里
+tick 几百次也只有一行，`reason` 保留最新一次的原因）。等它真的推出去或最终被挡下，这条过程行会被
+最终结论覆盖——不会出现「同时又延后又已推送」的自相矛盾。而**还没到合并窗口**的消息仍是
+「尚未决定」，一行都不留，避免每分钟刷噪声。
+
+`main.py decisions` 的抬头把两者分开显示：先是「已决分布」，再另起一行「延后未决 N 条」；
+`doctor` 的本地存储一行也会给出 `decisions_deferred`，夜里一眼能看出积压了多少条待推。
 
 ### 全链路自检 `main.py doctor`
 
