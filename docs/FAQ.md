@@ -86,6 +86,21 @@ Agent 属于未来的**上层可选能力**，不会反过来接管底层消息�
 可以。PDF / Word / Excel / PPT / zip 和图片（OCR）都能解析并纳入摘要。
 但必须有**大小、页数、频率、格式和安全限制**（如压缩炸弹防护），完整支持范围以 README 为准。
 
+### Q：某条消息没推给我，我怎么知道为什么？
+
+用决策日志查，不用翻日志文件：
+
+```powershell
+.\.venv\Scripts\python.exe main.py decisions --limit 20          # 最近 20 条的结论
+.\.venv\Scripts\python.exe main.py decisions --msg-id <msg_id>   # 某一条的完整轨迹
+```
+
+每条消息会留下一条最终结论——`pushed`（已推）/ `held`（进了摘要但没投出去）/ `filtered`（未命中）/
+`deduped`（重复跳过）/ `truncated`（超出每批上限）/ `duplicate`、`rejected`（入口就挡下）。
+`reason` 里带**当时的分值和阈值**（例如「分值 2 < 阈值 3」），所以后来改了配置也解释得通。
+
+注意：被限流或还没到合并窗口时，消息只是「尚未决定」，不会留结论行。等窗口到了才会写。
+
 ---
 
 ## 四、安全与风控

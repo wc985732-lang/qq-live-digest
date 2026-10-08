@@ -105,6 +105,25 @@ CREATE TABLE IF NOT EXISTS task_events (
 );
 CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_events_created ON task_events(created_at);
+
+CREATE TABLE IF NOT EXISTS decisions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    msg_id        TEXT NOT NULL DEFAULT '',
+    group_id      TEXT NOT NULL DEFAULT '',
+    digest_id     INTEGER NOT NULL DEFAULT 0,
+    stage         TEXT NOT NULL DEFAULT '',
+    outcome       TEXT NOT NULL DEFAULT '',
+    reason        TEXT NOT NULL DEFAULT '',
+    score         INTEGER NOT NULL DEFAULT 0,
+    min_score     INTEGER NOT NULL DEFAULT 0,
+    category      TEXT NOT NULL DEFAULT '',
+    rule_hits     TEXT NOT NULL DEFAULT '[]',
+    dedupe_reason TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_msg ON decisions(msg_id, id);
+CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions(created_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_outcome ON decisions(outcome, created_at);
 """
 
 
@@ -126,6 +145,13 @@ TASK_COLUMN_MIGRATIONS = {
     "snooze_until": "TEXT NOT NULL DEFAULT ''",
     "duplicate_of": "INTEGER NOT NULL DEFAULT 0",
 }
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 class Store:
@@ -267,6 +293,84 @@ class Store:
                 [(msg_id, digest_id, stamp) for msg_id in ids],
             )
         return len(ids)
+
+    # --------------------------------------------------------------- 决策日志
+    def record_decisions(self, rows: Iterable[dict[str, Any]]) -> int:
+        """批量写入决策轨迹。
+
+        字段缺失一律按默认值处理：决策日志是**旁路观测**，多一个键或少一个键都不该影响主链路。
+        """
+        stamp = iso(now_local())
+        prepared: list[tuple[Any, ...]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            outcome = str(row.get("outcome") or "")
+            msg_id = str(row.get("msg_id") or "")
+            if not outcome and not msg_id:
+                continue
+            hits = row.get("rule_hits") or []
+            if not isinstance(hits, str):
+                hits = json.dumps([str(item) for item in hits], ensure_ascii=False)
+            prepared.append(
+                (
+                    msg_id,
+                    str(row.get("group_id") or ""),
+                    _as_int(row.get("digest_id")),
+                    str(row.get("stage") or ""),
+                    outcome,
+                    str(row.get("reason") or ""),
+                    _as_int(row.get("score")),
+                    _as_int(row.get("min_score")),
+                    str(row.get("category") or ""),
+                    hits,
+                    str(row.get("dedupe_reason") or ""),
+                    iso(row.get("created_at") or stamp),
+                )
+            )
+        if not prepared:
+            return 0
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO decisions
+                    (msg_id, group_id, digest_id, stage, outcome, reason, score, min_score,
+                     category, rule_hits, dedupe_reason, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                prepared,
+            )
+        return len(prepared)
+
+    def decisions_for(self, msg_id: str, *, limit: int = 50) -> list[dict[str, Any]]:
+        """一条消息的完整决策轨迹（新→旧）。"""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM decisions WHERE msg_id = ? ORDER BY id DESC LIMIT ?",
+                (str(msg_id or ""), max(1, int(limit))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def recent_decisions(self, *, limit: int = 30, outcome: str = "") -> list[dict[str, Any]]:
+        sql = "SELECT * FROM decisions"
+        params: list[Any] = []
+        if str(outcome or "").strip():
+            sql += " WHERE outcome = ?"
+            params.append(str(outcome).strip())
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, int(limit)))
+        with self._connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def decision_counts(self, *, hours: int = 24) -> dict[str, int]:
+        cutoff = iso(now_local() - dt.timedelta(hours=max(1, int(hours))))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT outcome, COUNT(*) AS total FROM decisions WHERE created_at >= ? GROUP BY outcome",
+                (cutoff,),
+            ).fetchall()
+        return {str(row["outcome"] or "unknown"): int(row["total"] or 0) for row in rows}
 
     def oldest_unprocessed(self) -> str:
         with self._connect() as connection:
@@ -1063,6 +1167,7 @@ class Store:
             cursor = connection.execute("DELETE FROM messages WHERE received_at < ?", (cutoff,))
             removed = cursor.rowcount or 0
             connection.execute("DELETE FROM processed WHERE msg_id NOT IN (SELECT msg_id FROM messages)")
+            connection.execute("DELETE FROM decisions WHERE created_at < ?", (cutoff,))
         return removed
 
     def counts(self) -> dict[str, int]:
@@ -1077,6 +1182,7 @@ class Store:
                     "SELECT COUNT(*) FROM messages m LEFT JOIN processed p ON p.msg_id=m.msg_id WHERE p.msg_id IS NULL"
                 ),
                 "digests": scalar("SELECT COUNT(*) FROM digests"),
+                "decisions": scalar("SELECT COUNT(*) FROM decisions"),
                 "deliveries_sent": scalar("SELECT COUNT(*) FROM deliveries WHERE status='sent'"),
                 "deliveries_failed": scalar("SELECT COUNT(*) FROM deliveries WHERE status='failed'"),
             }

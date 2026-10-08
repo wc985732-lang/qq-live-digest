@@ -9,6 +9,7 @@ import logging
 import threading
 from typing import Any
 
+from . import decisions
 from .bot import BotRunner
 from .attachments import Attachment, AttachmentWorker, cleanup_files
 from .catchup import NapCatClient, backfill
@@ -144,10 +145,17 @@ class DigestService:
         msg_id = str(record.get("msg_id") or "").strip()
         if not msg_id:
             self.logger.warning("忽略没有 msg_id 的消息：%s", str(record)[:200])
+            self._record_decision(
+                record,
+                stage=decisions.STAGE_INTAKE,
+                outcome=decisions.REJECTED,
+                reason="消息缺少 msg_id，无法去重",
+            )
             return False
         group_id = str(record.get("group_id") or "")
         if group_id and not self.settings.accepts_group(group_id):
             self.logger.debug("忽略白名单外的群：%s", group_id)
+            self._record_intake_rejection(record, group_id, "群不在 QQ_DIGEST_GROUPS 白名单内")
             return False
         group_name = str(record.get("group_name") or "") or self.settings.group_name(group_id)
         try:
@@ -175,7 +183,76 @@ class DigestService:
                 msg_id,
                 str(record.get("content") or "")[:60].replace("\n", " "),
             )
+        else:
+            self._record_decision(
+                record,
+                stage=decisions.STAGE_INTAKE,
+                outcome=decisions.DUPLICATE,
+                reason="msg_id 重复：这条消息之前已经入库处理过",
+            )
         return inserted
+
+    # --------------------------------------------------------------- 决策日志
+    def _record_decision(
+        self,
+        record: dict[str, Any],
+        *,
+        stage: str,
+        outcome: str,
+        reason: str,
+        digest_id: int = 0,
+        when: dt.datetime | None = None,
+    ) -> None:
+        """写一条决策轨迹。这是旁路观测：写不进去只降级 debug，绝不拖垮消息链路。"""
+        try:
+            self.store.record_decisions(
+                [
+                    {
+                        "msg_id": str(record.get("msg_id") or ""),
+                        "group_id": str(record.get("group_id") or ""),
+                        "digest_id": int(digest_id or 0),
+                        "stage": stage,
+                        "outcome": outcome,
+                        "reason": reason,
+                        "created_at": iso(when or now_local()),
+                    }
+                ]
+            )
+        except Exception:  # noqa: BLE001
+            self.logger.debug("决策日志写入失败：%s", record.get("msg_id"), exc_info=True)
+
+    def _record_intake_rejection(self, record: dict[str, Any], group_id: str, reason: str) -> None:
+        """白名单外的群可能一直在刷，不能来一条记一行：每个群每天只记第一条。"""
+        key = f"reject_log:{group_id}:{now_local():%Y%m%d}"
+        if self._bump_meta_counter(key) > 1:
+            return
+        self._record_decision(
+            record,
+            stage=decisions.STAGE_INTAKE,
+            outcome=decisions.REJECTED,
+            reason=f"{reason}（该群今天只记这一条，其余同类消息不再重复记录）",
+        )
+
+    def _flush_decisions(self, digest: Digest, *, delivered: bool) -> None:
+        """把本批决策轨迹落库：未命中/去重/截断照抄，「命中候选」回填最终结果。"""
+        rows = [dict(row) for row in (digest.decisions or [])]
+        if not rows:
+            return
+        for row in rows:
+            if str(row.get("outcome") or "") != decisions.PENDING:
+                continue
+            row["digest_id"] = int(digest.id or 0)
+            base = str(row.get("reason") or "命中候选")
+            if delivered:
+                row["outcome"] = decisions.PUSHED
+                row["reason"] = f"{base}，已推送"
+            else:
+                row["outcome"] = decisions.HELD
+                row["reason"] = f"{base}，本次未投出（暂无可用通道、全部失败或稍后重试）"
+        try:
+            self.store.record_decisions(rows)
+        except Exception:  # noqa: BLE001
+            self.logger.debug("决策日志批量写入失败（digest=%s）", digest.id, exc_info=True)
 
     # --------------------------------------------------------------- 生命周期
     # ------------------------------------------------------- 限流与降级状态
@@ -658,7 +735,7 @@ class DigestService:
             urgent_ids = {item["msg_id"] for item in urgent}
             subset = [record for record in records if record["msg_id"] in urgent_ids]
             digest = build_digest(self.settings, subset, kind="urgent", now=stamp, history=history)
-            self._publish(digest, when=stamp)
+            self._flush_decisions(digest, delivered=self._publish(digest, when=stamp))
             produced.append(digest)
             records = [record for record in records if record["msg_id"] not in urgent_ids]
             if not records:
@@ -677,7 +754,7 @@ class DigestService:
                 digest = build_digest(
                     self.settings, immediate_records, kind="window", now=stamp, history=history
                 )
-                self._publish(digest, when=stamp)
+                self._flush_decisions(digest, delivered=self._publish(digest, when=stamp))
                 produced.append(digest)
                 records = [record for record in records if record["msg_id"] not in immediate_ids]
                 if not records:
@@ -701,7 +778,7 @@ class DigestService:
 
         digest = build_digest(self.settings, records, kind="window", now=stamp, history=history)
         if digest.items:
-            self._publish(digest, when=stamp)
+            self._flush_decisions(digest, delivered=self._publish(digest, when=stamp))
         else:
             digest.kind = "silent"
             digest.id = self.store.insert_digest(
@@ -714,6 +791,7 @@ class DigestService:
                 llm_used=False,
             )
             self.store.mark_processed(digest.message_ids, digest.id)
+            self._flush_decisions(digest, delivered=False)
             self.logger.info("窗口内 %d 条消息无重点，静默归档（未推送）。", digest.message_count)
         produced.append(digest)
         self._retry()

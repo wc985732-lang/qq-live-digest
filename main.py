@@ -36,6 +36,7 @@ from qq_live_digest.doctor import (  # noqa: E402
     worst_status,
 )
 from qq_live_digest.attachments import IMAGE_EXTS, Attachment  # noqa: E402
+from qq_live_digest import decisions  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
 from qq_live_digest.weburl import build_web_url  # noqa: E402
@@ -172,6 +173,35 @@ def command_show(args: argparse.Namespace) -> int:
             if item.get("evidence"):
                 print(f"     依据：{item['evidence']}")
         print()
+    return 0
+
+
+def command_decisions(args: argparse.Namespace) -> int:
+    """回看决策日志：每条消息为什么被推 / 没被推。"""
+    settings = load_settings(args)
+    service = build_service(settings, console=False)
+    store = service.store
+
+    if args.msg_id:
+        rows = store.decisions_for(args.msg_id, limit=args.limit or 50)
+        if not rows:
+            print(f"没有 {args.msg_id} 的决策记录：可能早于本功能上线，或这条消息还没进入处理窗口。")
+            return 0
+        print(f"消息 {args.msg_id} 的决策轨迹（新 → 旧）：")
+        for line in decisions.describe_rows(rows):
+            print(line)
+        return 0
+
+    counts = store.decision_counts(hours=args.hours or 24)
+    if counts:
+        print(f"最近 {args.hours or 24} 小时的决策分布：" + decisions.summarise_counts(counts))
+        print()
+    rows = store.recent_decisions(limit=args.limit or 20, outcome=args.outcome or "")
+    if not rows:
+        print("还没有决策记录。")
+        return 0
+    for line in decisions.describe_rows(rows):
+        print(line)
     return 0
 
 
@@ -419,6 +449,13 @@ def build_parser() -> argparse.ArgumentParser:
     show = sub.add_parser("show", help="回看最近几条摘要及判断依据")
     show.add_argument("--limit", type=int, default=5)
     show.set_defaults(func=command_show)
+
+    why = sub.add_parser("decisions", aliases=["why"], help="决策日志：为什么推 / 为什么不推")
+    why.add_argument("--msg-id", dest="msg_id", default="", help="只看某条消息的完整决策轨迹")
+    why.add_argument("--outcome", default="", help="按结论过滤（filtered / deduped / truncated / rejected / duplicate / pushed / held）")
+    why.add_argument("--hours", type=int, default=24, help="统计最近多少小时的结论分布")
+    why.add_argument("--limit", type=int, default=0, help="最多显示多少条（列表默认 20，按消息查默认 50）")
+    why.set_defaults(func=command_decisions)
 
     tasks = sub.add_parser("tasks", help="查看待办清单和手机访问地址")
     tasks.add_argument("--all", action="store_true", help="包含已完成")

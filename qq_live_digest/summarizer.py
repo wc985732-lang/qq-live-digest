@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:  # 允许从任意工作目录导入 qq_di
 import qq_digest  # noqa: E402  (需要先修好 sys.path)
 from qq_digest import Message  # noqa: E402
 
+from . import decisions  # noqa: E402
 from .config import Settings  # noqa: E402
 from .retry import llm_should_retry  # noqa: E402
 from .timeutil import now_local, parse_iso  # noqa: E402
@@ -55,6 +56,7 @@ class Digest:
     message_count: int = 0
     groups: list[str] = field(default_factory=list)
     id: int = 0
+    decisions: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def has_focus(self) -> bool:
@@ -287,14 +289,28 @@ def classify_task_item(item: dict[str, Any], settings: Settings) -> dict[str, An
     return {"status": status, "confidence": confidence, "reason": reason, "source": str(item.get("source") or "qq_message")}
 
 
-def is_focus(analysis: dict[str, Any], settings: Settings) -> bool:
+def focus_reason(analysis: dict[str, Any], settings: Settings) -> str:
+    """没进候选时给出人话原因；命中候选返回空串。
+
+    这里是「算不算重点」的判定本体——`is_focus` 只是它的一层薄封装，
+    这样决策日志里写的原因和真实判定永远一致，不会各改各的。
+    """
     if bool(analysis.get("colloquial_question")):
-        return False
+        return "像闲聊提问，未命中指令式通知"
     if is_quiet_group_item(analysis, settings) and not is_notice_item(analysis, settings):
-        return False
+        return "安静群且未命中通知关键词"
+    score = int(analysis.get("score") or 0)
     if analysis.get("category") == "urgent":
-        return int(analysis.get("score") or 0) >= 1
-    return int(analysis.get("score") or 0) >= settings.min_score
+        if score >= 1:
+            return ""
+        return f"紧急类但分值 {score} < 1"
+    if score >= settings.min_score:
+        return ""
+    return f"分值 {score} < 阈值 {settings.min_score}"
+
+
+def is_focus(analysis: dict[str, Any], settings: Settings) -> bool:
+    return not focus_reason(analysis, settings)
 
 
 def filter_recent_duplicates(
@@ -370,12 +386,66 @@ def urgent_analyses(
     return urgent
 
 
+def _dedupe_reference(item: dict[str, Any]) -> str:
+    """去重时命中的那条历史内容，写进决策日志便于人工核对。"""
+    reference = item.get("suppressed_duplicate")
+    if not isinstance(reference, dict):
+        return ""
+    group = str(reference.get("group") or "").strip()
+    summary = str(reference.get("summary") or "").strip()[:60]
+    return " · ".join(part for part in (group, summary) if part)
+
+
+def _append_trail(
+    trail: list[dict[str, Any]] | None,
+    item: dict[str, Any],
+    settings: Settings,
+    *,
+    stage: str,
+    outcome: str,
+    reason: str,
+    dedupe_reason: str = "",
+) -> None:
+    """记一条决策轨迹；`trail is None` 时什么都不做（预览等只读路径不需要落库）。"""
+    if trail is None:
+        return
+    trail.append(
+        {
+            "msg_id": str(item.get("msg_id") or ""),
+            "group_id": str(item.get("group_id") or ""),
+            "stage": stage,
+            "outcome": outcome,
+            "reason": reason,
+            "score": int(item.get("score") or 0),
+            "min_score": int(settings.min_score or 0),
+            "category": str(item.get("category") or ""),
+            "rule_hits": decisions.rule_hits(item),
+            "dedupe_reason": dedupe_reason,
+        }
+    )
+
+
 def _prepare_items(
     analyses: list[dict[str, Any]],
     settings: Settings,
     history: Iterable[dict[str, Any]] | None = None,
+    trail: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], bool, str, bool]:
-    candidates = [item for item in analyses if is_focus(item, settings)]
+    candidates: list[dict[str, Any]] = []
+    for item in analyses:
+        reason = focus_reason(item, settings)
+        if reason:
+            _append_trail(
+                trail,
+                item,
+                settings,
+                stage=decisions.STAGE_FILTER,
+                outcome=decisions.FILTERED,
+                reason=reason,
+            )
+            continue
+        candidates.append(item)
+
     if history:
         candidates, suppressed = filter_recent_duplicates(candidates, history, settings)
         if suppressed:
@@ -388,9 +458,52 @@ def _prepare_items(
                 settings.dedupe_hours,
                 "、".join(names) or "来源未知",
             )
-    candidates = qq_digest.dedupe_items(candidates)
+            for item in suppressed:
+                _append_trail(
+                    trail,
+                    item,
+                    settings,
+                    stage=decisions.STAGE_DEDUPE,
+                    outcome=decisions.DEDUPED,
+                    reason=f"与最近 {int(settings.dedupe_hours)} 小时内已推内容重复",
+                    dedupe_reason=_dedupe_reference(item),
+                )
+
+    deduped = qq_digest.dedupe_items(candidates)
+    kept = {id(item) for item in deduped}
+    for item in candidates:
+        if id(item) in kept:
+            continue
+        _append_trail(
+            trail,
+            item,
+            settings,
+            stage=decisions.STAGE_DEDUPE,
+            outcome=decisions.DEDUPED,
+            reason="与本批另一条要点相同",
+        )
+    candidates = deduped
     candidates.sort(key=lambda value: int(value.get("score") or 0), reverse=True)
-    candidates = candidates[: settings.max_items]
+    limit = int(settings.max_items)
+    for item in candidates[limit:]:
+        _append_trail(
+            trail,
+            item,
+            settings,
+            stage=decisions.STAGE_FILTER,
+            outcome=decisions.TRUNCATED,
+            reason=f"命中但超出每批上限 {limit} 条",
+        )
+    candidates = candidates[:limit]
+    for item in candidates:
+        _append_trail(
+            trail,
+            item,
+            settings,
+            stage=decisions.STAGE_PUBLISH,
+            outcome=decisions.PENDING,
+            reason=f"命中候选（分值 {int(item.get('score') or 0)}）",
+        )
 
     llm_used = False
     llm_error = ""
@@ -495,7 +608,8 @@ def build_digest(
     else:
         selected = analyses
 
-    items, llm_used, llm_error, llm_retryable = _prepare_items(selected, settings, history)
+    trail: list[dict[str, Any]] = []
+    items, llm_used, llm_error, llm_retryable = _prepare_items(selected, settings, history, trail)
     groups: list[str] = []
     for record in records:
         name = str(record.get("group_name") or record.get("group_id") or "")
@@ -513,6 +627,7 @@ def build_digest(
         llm_retryable=llm_retryable,
         message_count=len(records),
         groups=groups,
+        decisions=trail,
     )
     return finalize_digest(digest, settings)
 

@@ -35,7 +35,7 @@
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
-| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats |
+| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions |
 
 ## 环境要求
 
@@ -97,7 +97,29 @@ cd <项目目录>
 
 # 全链路自检（配置 / 存储 / NapCat / 接收服务 / 待办台 / 访问层）
 .\.venv\Scripts\python.exe main.py doctor
+
+# 决策日志：最近 20 条消息为什么被推 / 没被推
+.\.venv\Scripts\python.exe main.py decisions --limit 20
+
+# 只查某一条消息的完整决策轨迹
+.\.venv\Scripts\python.exe main.py decisions --msg-id <msg_id>
 ```
+
+### 决策日志 `main.py decisions`
+
+每条消息在「入口 → 筛选 → 去重 → 投递」这条链上只留**一条最终结论**，按 `msg_id` 就能读成一段轨迹：
+
+| 结论 | 含义 |
+| --- | --- |
+| `pushed` | 进了摘要，并且确实推到至少一个通道 |
+| `held` | 进了摘要，但这次没投出去（暂无可用通道 / 全部失败 / 稍后重试） |
+| `filtered` | 被本地规则挡下，`reason` 会写清是阈值、闲聊还是安静群 |
+| `deduped` | 与最近几小时已推内容重复，或与本批另一条要点相同（`dedupe_reason` 给出对照文本） |
+| `truncated` | 命中但超出 `QQ_DIGEST_MAX_ITEMS` 上限 |
+| `duplicate` / `rejected` | 入口就挡下了：`msg_id` 重复，或群不在白名单 |
+
+`reason` 里带着**当时的分值和阈值**（例如「分值 2 < 阈值 3」），所以改了配置之后旧记录依然解释得通。
+被限流或还没到窗口时消息只是「尚未决定」，不会留下结论行——这一点是刻意的，避免每分钟刷一行噪声。
 
 ### 全链路自检 `main.py doctor`
 

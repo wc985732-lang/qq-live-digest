@@ -26,6 +26,14 @@
   锁定「缺可选依赖时主程序与测试套件仍可用」这条边界。
 - `docs/FAQ.md` 新增「装完之后它会不会一直在后台跑？怎么彻底卸载？」。
 
+- 新增**决策日志**（Roadmap `A33`）：新增 `decisions` 表与 `qq_live_digest/decisions.py`，
+  把「入口 → 筛选 → 去重 → 投递」的结论按 `msg_id` 结构化落库（结论 / 原因 / 分值 / 当时阈值 /
+  命中规则 / 去重对照文本），`is_focus()` 拆出 `focus_reason()` 供日志与判定共用同一处逻辑。
+  新增 CLI `main.py decisions`（别名 `why`，支持 `--msg-id` / `--outcome` / `--hours`）。
+  `prune()` 与 `stats` 计数同步纳入 `decisions`。
+- 新增 `tests/test_decisions.py`（23 个用例）：判定与原因一致性、批内/跨窗口去重、超限截断、
+  入口拒绝（含每群每天只记一条的限流）、无通道时记 `held`、以及 CLI 渲染。
+
 ### 修复
 
 - **可选依赖不再拖垮整个进程**：`qq_live_digest/bot.py` 原先在 import 阶段 `raise SystemExit`，而
