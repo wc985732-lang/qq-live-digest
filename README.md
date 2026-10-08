@@ -94,7 +94,29 @@ cd <项目目录>
 
 # 测试微信推送
 .\.venv\Scripts\python.exe main.py send-test
+
+# 全链路自检（配置 / 存储 / NapCat / 接收服务 / 待办台 / 访问层）
+.\.venv\Scripts\python.exe main.py doctor
 ```
+
+### 全链路自检 `main.py doctor`
+
+`doctor` 会逐项检查 Python 版本、配置文件、群白名单、推送通道、OneBot 接收器、大模型、
+本地存储、NapCat、接收服务、待办台和访问层，每项给出 `OK / WARN / FAIL` 和一句可执行的建议：
+
+```text
+[OK  ] Python 版本   3.12.4
+[OK  ] 群白名单        6 个群：95***96、10***22、55***18 等 6 个（已脱敏）
+[FAIL] 推送通道        未配置任何可用通道
+                   → 至少配置 WxPusher / Server酱 / PushPlus / Webhook 之一
+[WARN] NapCat        get_status 请求失败: refused
+                   → 确认 NapCat 与 QQ 已启动并登录（实时接收与历史补采都依赖它）
+```
+
+- 退出码：有任何 `FAIL` 返回 1，否则 0，方便写进脚本或计划任务。
+- `--json`：输出同上内容的 JSON，便于自动化处理。
+- `--online`：额外在线校验 QQ 官方机器人凭证（默认不联网校验）。
+- 自检**只读**：不会发送消息、不改配置；输出已脱敏，不含 token、`.env` 全文和真实群号，可直接贴到 Issue 里。
 
 ## 百炼 AI 精简（推荐开启）
 

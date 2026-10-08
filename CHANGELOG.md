@@ -11,6 +11,10 @@
 - 新增 `CONTRIBUTING.md`、`SECURITY.md`、Issue 模板与 PR 模板。
 - 新增 `tests/test_security.py`：安全边界回归测试（接收端请求体上限、鉴权失败不进入处理链路、
   `/health` 免鉴权但不泄露、SSRF 补充分支、压缩炸弹限制、移动端待办台鉴权），并在 CI 中单独成步运行。
+- `main.py doctor` 重写为**全链路自检**（新增 `qq_live_digest/doctor.py`）：逐项检查 Python 版本、配置文件、
+  群白名单、推送通道、OneBot 接收器、大模型、本地存储、NapCat、接收服务、待办台与访问层，
+  每项给出 `OK/WARN/FAIL` 与一句可执行建议；新增 `--json`；输出脱敏，不含 token、`.env` 全文与真实群号。
+- 新增 `tests/test_doctor.py`（29 个用例，全部离线，不依赖 NapCat / 网络 / 真实群号）。
 
 ### 修复
 - 附件下载在服务端返回的 `Content-Length` 与实际字节数不符（连接被截断）时会静默保存不完整文件，

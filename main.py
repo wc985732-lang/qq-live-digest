@@ -27,6 +27,14 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from qq_live_digest.config import Settings, ensure_dirs  # noqa: E402
+from qq_live_digest.doctor import (  # noqa: E402
+    FAIL,
+    DoctorContext,
+    as_dicts,
+    render,
+    run_checks,
+    worst_status,
+)
 from qq_live_digest.attachments import IMAGE_EXTS, Attachment  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
@@ -231,42 +239,22 @@ def _check_token(settings: Settings, timeout: int = 15) -> tuple[bool, str]:
 def command_doctor(args: argparse.Namespace) -> int:
     configure_console()
     settings = load_settings(args)
-    service = build_service(settings)
-    ok = True
-
-    print("== 配置 ==")
-    print(json.dumps(settings.describe(), ensure_ascii=False, indent=2))
-    for problem in settings.problems():
-        print(f"  ! {problem}")
-    print(f"  env_file: {settings.env_file}")
-
-    print("== 数据库 ==")
-    counts = service.store.counts()
-    print(f"  {settings.data_dir / 'digest.sqlite3'}")
-    print(f"  {json.dumps(counts, ensure_ascii=False)}")
-
-    print("== 推送通道 ==")
-    manager = service.push_manager()
-    if manager.pushers:
-        for pusher in manager.pushers:
-            print(f"  - {pusher.describe()} tier={pusher.tier}")
+    try:
+        ensure_dirs(settings)
+    except OSError as error:
+        print(f"[FAIL] 数据目录不可用  {error}  → 检查磁盘空间与目录权限")
+        return 1
+    context = DoctorContext(
+        settings=settings,
+        bot_credential_check=(lambda: _check_token(settings, settings.http_timeout)) if args.online else None,
+    )
+    checks = run_checks(context)
+    if args.json:
+        print(json.dumps(as_dicts(checks), ensure_ascii=False, indent=2))
     else:
-        ok = False
-        print("  ! 未配置任何可用通道")
-
-    print("== QQ 机器人 ==")
-    if args.online:
-        if not settings.appid or not settings.secret:
-            ok = False
-            print("  ! 缺少 AppID/AppSecret，跳过在线校验")
-        else:
-            passed, message = _check_token(settings, settings.http_timeout)
-            ok = ok and passed
-            print(("  OK " if passed else "  ! ") + message)
-    else:
-        print("  （默认离线自检；加 --online 会校验 AppID/AppSecret）")
-
-    return 0 if ok else 1
+        print(render(checks))
+        print("提示：加 --online 会额外在线校验 QQ 官方机器人凭证；加 --json 便于脚本处理。")
+    return 1 if worst_status(checks) == FAIL else 0
 
 
 def command_send_test(args: argparse.Namespace) -> int:
@@ -445,8 +433,9 @@ def build_parser() -> argparse.ArgumentParser:
     catchup = sub.add_parser("catchup", help="从 NapCat 补采最近的历史群消息")
     catchup.set_defaults(func=command_catchup)
 
-    doctor = sub.add_parser("doctor", help="自检")
-    doctor.add_argument("--online", action="store_true", help="在线校验机器人凭证")
+    doctor = sub.add_parser("doctor", help="全链路自检")
+    doctor.add_argument("--online", action="store_true", help="额外在线校验 QQ 官方机器人凭证")
+    doctor.add_argument("--json", action="store_true", help="以 JSON 输出自检结果")
     doctor.set_defaults(func=command_doctor)
 
     send_test = sub.add_parser("send-test", help="发送测试推送")
