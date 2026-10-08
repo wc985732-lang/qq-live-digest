@@ -285,6 +285,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File <NapCat目录>\watchdog.ps1
 - 摘要由本地规则生成，可选大模型只做精炼；模型失败会自动回退本地规则。
 - SQLite 默认保存最近 30 天消息（`QQ_DIGEST_RETENTION_DAYS`），`msg_id` 唯一约束保证重启不重复推送。
 
+## 参与与文档
+
+- [发展规划 Roadmap](docs/ROADMAP.md)：项目唯一路线图入口，含评分模型与分阶段排期。
+- [常见问题 FAQ](docs/FAQ.md)：定位、模型、风控、部署等统一口径。
+- [贡献指南](CONTRIBUTING.md)：分支、测试、代码风格、隐私与安全要求。
+- [安全政策](SECURITY.md)：如何私密报告安全问题。
+- [更新日志](CHANGELOG.md)：各版本变更记录。
+
 ## License
 
 MIT License. See `LICENSE`.

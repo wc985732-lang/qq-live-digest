@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞（私密报告）
+    url: https://github.com/wc985732-lang/qq-live-digest/security/advisories/new
+    about: 请不要公开披露安全问题，改用私密渠道。
+  - name: 常见问题 FAQ
+    url: https://github.com/wc985732-lang/qq-live-digest/blob/main/docs/FAQ.md
+    about: 部署、概念、模型、风控等问题先看这里。
+  - name: 路线图 Roadmap
+    url: https://github.com/wc985732-lang/qq-live-digest/blob/main/docs/ROADMAP.md
+    about: 想法会先进候选池，按评分排期。

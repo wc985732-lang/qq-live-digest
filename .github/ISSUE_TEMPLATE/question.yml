@@ -1,0 +1,38 @@
+name: 使用提问
+description: 询问部署、配置或使用问题
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提问前请先看 `docs/FAQ.md` 和 README。**不要**贴出 Token、`.env`、真实群号/QQ 号或本机绝对路径。
+  - type: checkboxes
+    id: prep
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已阅读 README 与 docs/FAQ.md，没有找到答案
+          required: true
+        - label: 已脱敏所有敏感信息
+          required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: 你的问题
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: 你已经尝试过什么
+      description: 例如运行过 `main.py doctor`，输出是什么。
+    validations:
+      required: false
+  - type: input
+    id: env
+    attributes:
+      label: 运行环境
+      placeholder: "Windows 11 / Python 3.12 / NapCat x.y.z"
+    validations:
+      required: false

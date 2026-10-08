@@ -1,0 +1,67 @@
+name: Bug 反馈
+description: 报告一个可复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请先确认：**不要**贴出 Token、`.env` 内容、真实群号/QQ 号、本机绝对路径或未脱敏的消息原文。
+        安全相关问题请改用 SECURITY.md 中的私密渠道。
+  - type: checkboxes
+    id: prep
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索现有 Issue，没有重复
+          required: true
+        - label: 已按下面要求脱敏所有敏感信息
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题现象
+      description: 实际发生了什么？期望发生什么？
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 越具体越好；能给出最小复现最佳。
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 提交
+      description: Release 版本号或 git commit
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 运行环境
+      description: 操作系统、Python 版本、NapCat/OneBot 版本、推送通道
+      placeholder: "Windows 11 / Python 3.12 / NapCat x.y.z / WxPusher"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志（已脱敏）
+      description: 建议提供 `logs/qq-live-digest.log` 的相关片段，以及 `main.py doctor` 的输出。
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 期望的验收条件
+      description: 修好之后，怎么算修好？
+    validations:
+      required: false
