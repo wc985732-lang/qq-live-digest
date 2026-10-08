@@ -321,6 +321,8 @@ def replay(
     max_items: int = 30,
     min_score: int = 3,
     step_minutes: int = 5,
+    service: DigestService | None = None,
+    channel: MemoryPusher | None = None,
     logger: logging.Logger | None = None,
 ) -> FunnelReport:
     """把一批消息喂进真实链路，并按时间推进调度时钟，最后统计漏斗。
@@ -328,15 +330,18 @@ def replay(
     走的是和生产完全相同的代码路径（入库 → 判定 → 摘要 → 投递 → 决策日志），
     差别只有两处：通道是内存假通道，大模型关闭时自动回退本地规则。
     """
-    service, channel = build_service(
-        data_dir,
-        quiet_hours=quiet_hours,
-        window_minutes=window_minutes,
-        daily_budget=daily_budget,
-        max_items=max_items,
-        min_score=min_score,
-        logger=logger,
-    )
+    if service is None or channel is None:
+        built_service, built_channel = build_service(
+            data_dir,
+            quiet_hours=quiet_hours,
+            window_minutes=window_minutes,
+            daily_budget=daily_budget,
+            max_items=max_items,
+            min_score=min_score,
+            logger=logger,
+        )
+        service = service or built_service
+        channel = channel or built_channel
     ordered = sorted(records, key=lambda item: str(item.get("received_at") or ""))
     moments = [parse_iso(item.get("received_at")) for item in ordered]
     moments = [item for item in moments if isinstance(item, dt.datetime)]

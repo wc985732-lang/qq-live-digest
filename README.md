@@ -11,6 +11,16 @@
   <img src="docs/screenshots/mobile-tasks.jpg" width="380" alt="手机待办台：完成度卡片、紧急与待办标签、群来源、查看完整原文与纠错入口" />
 </p>
 
+群聊降噪效果（26 秒）：假群里的一天 500 条消息，经本地规则过滤、重复合并后只剩 23 次通知，
+并顺手建好 63 项待办。画面里的群、人、消息全部是程序生成的虚构示例：
+
+<p align="center">
+  <img src="docs/demo/demo.gif" width="720" alt="假群聊回放演示：500 条群消息 → 过滤 377 条 + 重复 54 条 → 68 条要点 → 23 次通知 → 63 项待办" />
+</p>
+
+这条片子由 `python tools/make_demo.py` 生成，**数字全部来自真实回放**，可用
+`python main.py simulate --count 500` 自己复现；也提供 [mp4 版](docs/demo/demo.mp4)（0.5 MB）。
+
 ## 功能概览
 
 - 只接收白名单 QQ 群，消息在本地完成筛选、摘要和待办提取。
