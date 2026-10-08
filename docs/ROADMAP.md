@@ -90,7 +90,7 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | A30 | 故障演练（NapCat 掉线 / LLM 超时 429/5xx / 推送失败 / 重启） | ✅ | 4 | 4 | 3 | 5 | 3 | 4 | **3.90** | M | — |
 | A19 | 一键安装/诊断（`doctor` 扩展为 setup doctor，检查全链路） | ✅ | 4 | 4 | 5 | 4 | 4 | 4 | **3.85** | S–M | — |
 | A23 | GitHub Issue 模板 + 标签（bug/feature/question/security、good first issue） | ✅ | 3 | 3 | 5 | 3 | 5 | 5 | **3.70** | S | — |
-| A20 | 测试数据模拟器（fake OneBot events + fixtures + 端到端） | 🟡 | 3 | 4 | 4 | 3 | 5 | 4 | **3.65** | M | — |
+| A20 | 测试数据模拟器（fake OneBot events + fixtures + 端到端；`qq_live_digest/simulator.py` + `main.py simulate`，离线 + 确定性，A21 的数据来源） | ✅ | 3 | 4 | 4 | 3 | 5 | 4 | **3.65** | M | — |
 | A24 | CONTRIBUTING + PR 模板（分支/测试/风格/隐私/安全） | ✅ | 3 | 3 | 5 | 3 | 5 | 5 | **3.65** | S | — |
 | A25 | Release/Changelog 规范（沿用 v0.1.0 节奏） | ✅ | 3 | 3 | 5 | 3 | 4 | 5 | **3.60** | S | — |
 

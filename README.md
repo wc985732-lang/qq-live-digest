@@ -35,7 +35,7 @@
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
-| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions |
+| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / simulate |
 
 ## 环境要求
 
@@ -106,6 +106,9 @@ cd <项目目录>
 
 # 只查「延后未决」：本该推、但被夜间静默 / 额度 / 大模型失败推迟的
 .\.venv\Scripts\python.exe main.py decisions --outcome deferred
+
+# 假群聊回放：500 条消息走完整链路，一条真实推送都不发（不联网、不碰 data/）
+.\.venv\Scripts\python.exe main.py simulate --count 500
 ```
 
 ### 决策日志 `main.py decisions`
@@ -131,6 +134,28 @@ tick 几百次也只有一行，`reason` 保留最新一次的原因）。等它
 
 `main.py decisions` 的抬头把两者分开显示：先是「已决分布」，再另起一行「延后未决 N 条」；
 `doctor` 的本地存储一行也会给出 `decisions_deferred`，夜里一眼能看出积压了多少条待推。
+
+### 假群聊回放 `main.py simulate`
+
+想验证「500 条群消息最后剩下几条通知」，不用真去加群、也不用量自己的数据：
+
+```powershell
+.\.venv\Scripts\python.exe main.py simulate --count 500              # 500 条 / 16 小时 / 默认配置
+.\.venv\Scripts\python.exe main.py simulate --quiet-hours 23:00-07:00 # 看夜间静默把消息推成「延后未决」
+.\.venv\Scripts\python.exe main.py simulate --budget 0                # 不限额度，看自然聚合的结果
+.\.venv\Scripts\python.exe main.py simulate --out events.jsonl --write-only   # 只导出 fixture
+```
+
+它生成的是一整天的高校群消息流——闲聊、通知、作业、考试安排、活动报名、广告、图片、文件、
+跨群重复转发，字段与 OneBot 上报完全一致，所以走的是**和生产完全相同的代码路径**：
+入库 → 判定 → 去重 → 摘要 → 投递 → 决策日志。
+
+三件事是刻意的：
+
+- **不联网**：通道是内存里的假通道，大模型关闭，自动回退本地规则；配置里没有任何凭证。
+- **不碰 `data/`**：默认在一个临时目录里跑，跑完可以直接删。
+- **确定性**：`--seed` 相同必然得到同一份数据，`msg_id` 形如 `sim-20261008-00042`，
+  可以拿 `main.py decisions --msg-id` 逐条回查为什么它被推 / 被挡。
 
 ### 全链路自检 `main.py doctor`
 

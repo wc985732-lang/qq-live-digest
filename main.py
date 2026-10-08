@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -213,6 +214,53 @@ def command_decisions(args: argparse.Namespace) -> int:
         print(line)
     return 0
 
+
+
+def command_simulate(args: argparse.Namespace) -> int:
+    """用假群聊把整条链路跑一遍（Roadmap A20）：消息 → 判定 → 摘要 → 内存假通道。
+
+    全程不联网、不读 `.env`、不用真实通道、不碰 `data/`，可以放心在 CI 与演示里跑。
+    """
+    from qq_live_digest import simulator
+
+    if args.fixture:
+        records = simulator.read_fixture(args.fixture)
+        print(f"载入 fixture：{args.fixture}（{len(records)} 条消息）")
+    else:
+        records = simulator.generate(args.count, seed=args.seed, span_hours=args.hours)
+        print(f"生成假群聊：{len(records)} 条消息 / {args.hours:g} 小时 / seed={args.seed}")
+    if args.out:
+        written = simulator.write_fixture(args.out, records)
+        print(f"已写出 fixture：{args.out}（{written} 行 JSONL）")
+    if args.write_only:
+        return 0
+
+    workdir = Path(args.dir) if args.dir else Path(tempfile.mkdtemp(prefix="qq-digest-sim-"))
+    workdir.mkdir(parents=True, exist_ok=True)
+    logging.getLogger("qq_live_digest").setLevel(logging.WARNING)
+    report = simulator.replay(
+        records,
+        data_dir=workdir,
+        quiet_hours=args.quiet_hours,
+        window_minutes=args.window,
+        daily_budget=args.budget,
+        max_items=args.max_items,
+        min_score=args.min_score,
+    )
+    print()
+    for line in report.summary_lines():
+        print(line)
+    if report.first_body:
+        print()
+        print("—— 实际推给用户的第一条内容（群里全是编造的假数据）——")
+        print(report.first_body)
+    print()
+    print(f"一次性数据库：{workdir}（跑完可直接删）")
+    print(
+        f"回查某条消息：$env:QQ_DIGEST_DATA_DIR='{workdir}'; "
+        f"python main.py decisions --msg-id sim-{args.seed}-00001"
+    )
+    return 0
 
 
 def command_tasks(args: argparse.Namespace) -> int:
@@ -475,6 +523,21 @@ def build_parser() -> argparse.ArgumentParser:
     tasks.add_argument("--days", type=int, default=7, help="回填最近多少天")
     tasks.add_argument("--reset", action="store_true", help="先清空待办库再回填")
     tasks.set_defaults(func=command_tasks)
+
+    sim = sub.add_parser("simulate", aliases=["sim"], help="假群聊回放整条链路（不联网、不碰真实数据）")
+    sim.add_argument("--count", type=int, default=500, help="生成多少条消息")
+    sim.add_argument("--seed", type=int, default=20261008, help="随机种子：同参数必得同数据")
+    sim.add_argument("--hours", type=float, default=16.0, help="消息铺开多少小时（08:00 起算）")
+    sim.add_argument("--fixture", default="", help="改从 JSONL fixture 读消息")
+    sim.add_argument("--out", default="", help="把生成的消息写成 JSONL fixture")
+    sim.add_argument("--write-only", action="store_true", dest="write_only", help="只写 fixture 不回放")
+    sim.add_argument("--dir", default="", help="指定数据目录（默认临时目录，跑完即可删）")
+    sim.add_argument("--window", type=int, default=30, help="合并窗口分钟数（默认对齐真实部署）")
+    sim.add_argument("--budget", type=int, default=12, help="每日推送额度（0 = 不限）")
+    sim.add_argument("--max-items", type=int, default=30, dest="max_items", help="每批最多几条要点")
+    sim.add_argument("--min-score", type=int, default=3, dest="min_score", help="入摘要的最低分值")
+    sim.add_argument("--quiet-hours", default="", dest="quiet_hours", help="夜间静默时段，如 23:00-07:00")
+    sim.set_defaults(func=command_simulate)
 
     catchup = sub.add_parser("catchup", help="从 NapCat 补采最近的历史群消息")
     catchup.set_defaults(func=command_catchup)
