@@ -713,6 +713,8 @@ def download(
                 if total > max_bytes:
                     raise AttachmentError("文件超过下载上限")
                 handle.write(chunk)
+        if length and total != length:
+            raise AttachmentError(f"下载不完整：收到 {total}/{length} 字节")
     except AttachmentError:
         temp.unlink(missing_ok=True)
         raise

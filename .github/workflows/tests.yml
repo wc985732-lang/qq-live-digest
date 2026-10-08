@@ -32,3 +32,7 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -t .
+
+      # 安全边界回归测试单独成步：失败时一眼能看出是安全问题，而不是普通用例
+      - name: Run security regression tests
+        run: python -m unittest tests.test_security
