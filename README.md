@@ -39,13 +39,14 @@
 | `qq_digest.py` | 本地筛选/摘要引擎（规则 + 可选百炼 LLM） |
 | `qq_live_digest/receiver.py` | OneBot v11 HTTP 接收器，监听 NapCat 上报 |
 | `qq_live_digest/catchup.py` | 调用 NapCat API 补采历史消息，按 `msg_id` 去重 |
-| `qq_live_digest/store.py` | SQLite + JSONL：消息去重、摘要归档、投递去重与重启恢复 |
+| `qq_live_digest/store.py` | SQLite + JSONL：消息去重、摘要归档、投递去重、模型用量与重启恢复 |
+| `qq_live_digest/llmstats.py` | 模型用量词表与日 / 周 / 月聚合、token 成本折算 |
 | `qq_live_digest/summarizer.py` | 分级筛选、待办/截止提取、推送文本生成 |
 | `qq_live_digest/push.py` | WxPusher / Server酱 / PushPlus / Webhook / QQ 私聊，失败自动回退 |
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
-| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / simulate |
+| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / simulate |
 
 ## 环境要求
 
@@ -117,9 +118,42 @@ cd <项目目录>
 # 只查「延后未决」：本该推、但被夜间静默 / 额度 / 大模型失败推迟的
 .\.venv\Scripts\python.exe main.py decisions --outcome deferred
 
+# 模型用量与成本：日视图（默认）、周 / 月视图、最近明细
+.\.venv\Scripts\python.exe main.py llm-stats
+.\.venv\Scripts\python.exe main.py llm-stats --period week
+.\.venv\Scripts\python.exe main.py llm-stats --period month --recent 20
+
 # 假群聊回放：500 条消息走完整链路，一条真实推送都不发（不联网、不碰 data/）
 .\.venv\Scripts\python.exe main.py simulate --count 500
 ```
+
+### 模型用量与成本 `main.py llm-stats`
+
+每次调用模型都会往 SQLite 的 `llm_calls` 表落**一行**：provider、模型名、输入/输出 token、
+耗时、失败原因，以及**是否重试过、是否降级回本地规则**。视图按日 / 周 / 月聚合：
+
+```powershell
+.\.venv\Scripts\python.exe main.py llm-stats                  # 最近 14 天，按天
+.\.venv\Scripts\python.exe main.py llm-stats --period week    # 最近 8 周
+.\.venv\Scripts\python.exe main.py llm-stats --period month   # 最近 6 个月
+.\.venv\Scripts\python.exe main.py llm-stats --recent 20      # 附最近 20 条调用明细
+.\.venv\Scripts\python.exe main.py llm-stats --json           # 交给脚本消费
+```
+
+每期给出调用次数、成功 / 失败 / 跳过、重试与降级次数、输入输出 token 与费用；末尾还有合计、
+用途分布（候选精炼 / 图片识别 / 文档理解）、模型分布和失败原因 TOP。
+
+| 列 | 含义 |
+| --- | --- |
+| 调用 / 成功 / 失败 | 一次**逻辑调用**算一次：同一批里重试多次仍然只算一行 |
+| 跳过 | 本该调用但没调（例如没配 `DASHSCOPE_API_KEY`）——让「为什么一条都没有」有答案 |
+| 重试 | 这一行发生过重试（`attempts > 1`） |
+| 降级 | 最终失败并回退本地规则（不会阻塞推送） |
+| 费用 | 按 `QQ_DIGEST_LLM_PRICE_IN` / `QQ_DIGEST_LLM_PRICE_OUT`（**元 / 百万 token**）折算 |
+
+费用只在展示时折算、不入库，所以改价目表可以重算历史；两个单价都留空就只统计 token。
+`doctor` 新增「模型用量」一行，给出最近 24 小时的调用次数、token 与费用，有失败会提示看明细。
+`llm_calls` 与 `decisions` 一样，随数据保留天数在 `prune` 时一起清理。
 
 ### 决策日志 `main.py decisions`
 

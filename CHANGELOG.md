@@ -6,6 +6,14 @@
 ## [Unreleased]
 
 ### 新增
+- 新增**Token / 成本统计**（Roadmap `A5`）：新增 `llm_calls` 表与 `qq_live_digest/llmstats.py`，
+  每次模型调用（候选精炼 / 图片识别 / 文档理解）都落一行，记录 provider、模型、输入输出 token、
+  耗时、失败原因，以及**是否重试过 / 是否降级回本地规则**；没配密钥或 `QQ_DIGEST_LLM_PROVIDER=none`
+  时记一行「跳过」，让成本面板能解释「为什么一条都没有」。
+  新增 `main.py llm-stats [--period day|week|month] [--buckets N] [--recent N] [--json]`
+  （别名 `cost`）提供日 / 周 / 月视图，按 `QQ_DIGEST_LLM_PRICE_IN` / `QQ_DIGEST_LLM_PRICE_OUT`
+  （元 / 百万 token，默认 0）**在展示时**折算费用，改价不用重写历史；`doctor` 新增「模型用量」
+  一行（最近 24 小时调用 / token / 费用 / 失败）。新增 `tests/test_llmstats.py`（36 个用例，全程不联网）。
 - 新增**模型 Provider 抽象**（Roadmap `A4`）：`qq_live_digest/providers.py` 定义
   `LLMProvider` / `LLMResult` / `NullProvider` / `OpenAICompatProvider` 与注册表；
   `qq_digest`（候选精炼）与 `attachments`（文档/图片理解）不再自己拼 HTTP 请求，

@@ -19,6 +19,7 @@ import qq_digest  # noqa: E402  (需要先修好 sys.path)
 from qq_digest import Message  # noqa: E402
 
 from . import decisions  # noqa: E402
+from . import llmstats  # noqa: E402
 from . import providers  # noqa: E402
 from .config import Settings  # noqa: E402
 from .retry import llm_should_retry  # noqa: E402
@@ -513,6 +514,11 @@ def _prepare_items(
         if not settings.dashscope_api_key:
             # 配置缺失属于人为问题：记录原因但不阻塞推送（llm_retryable 保持 False）。
             llm_error = "未配置 DASHSCOPE_API_KEY"
+            providers.record_skip(
+                purpose=llmstats.PURPOSE_REFINE,
+                reason=llm_error,
+                model=settings.dashscope_model,
+            )
         else:
             try:
                 candidates = qq_digest.refine_items(

@@ -10,6 +10,7 @@ import threading
 from typing import Any
 
 from . import decisions
+from . import providers
 from .bot import BotRunner
 from .attachments import Attachment, AttachmentWorker, cleanup_files
 from .catchup import NapCatClient, backfill
@@ -54,6 +55,9 @@ class DigestService:
             settings.data_dir / "digest.sqlite3",
             retention_days=settings.message_retention_days,
         )
+        # 模型用量落库（A5）：Provider 层只在挂了记录器时才写库，测试与库外调用不受影响。
+        self._llm_recorder = self.store.add_llm_call
+        providers.set_call_recorder(self._llm_recorder)
         self._bot = bot
         self._receiver = receiver
         self._pushers = pushers
@@ -490,6 +494,9 @@ class DigestService:
 
     def stop(self) -> None:
         self._stop.set()
+        # 只清除自己挂的记录器，避免把同时存在的另一个服务实例的记录器抹掉。
+        if providers.get_call_recorder() is self._llm_recorder:
+            providers.set_call_recorder(None)
         if self._catchup_thread is not None and self._catchup_thread.is_alive():
             self._catchup_thread.join(timeout=5)
         if self._attachment_worker is not None:
@@ -1167,6 +1174,7 @@ class DigestService:
             "channels": [pusher.describe() for pusher in (manager.pushers if manager else [])],
             "counts": self.store.counts(),
             "tasks": self.store.task_stats(),
+            "llm_usage": self.store.llm_call_summary(hours=24),
         }
 CATCHUP_RETRY_SECONDS = 5 * 60
 DEADLINE_LOOKBACK_HOURS = 72

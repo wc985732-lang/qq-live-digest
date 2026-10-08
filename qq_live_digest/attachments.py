@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import providers
+from . import llmstats, providers
 from .config import Settings
 from .retry import LLMError
 from .timeutil import iso, now_local
@@ -738,11 +738,13 @@ def chat_completion(
     model: str = "",
     timeout: int = 60,
     max_tokens: int = 600,
+    purpose: str = llmstats.PURPOSE_CHAT,
 ) -> str:
     """文本 / 视觉统一入口。
 
     传输与重试交给 Provider（`qq_live_digest.providers`），本模块不再自己拼 HTTP 请求，
-    因此换模型供应商只改配置，不动这里的业务代码（Roadmap A4）。
+    因此换模型供应商只改配置，不动这里的业务代码（Roadmap A4）。`purpose` 用于成本
+    面板区分「图片识别 / 文档理解」（Roadmap A5）。
     """
     provider = providers.build_provider(settings, model=model or settings.dashscope_model)
     try:
@@ -752,6 +754,7 @@ def chat_completion(
             retries=settings.llm_max_retries,
             backoff=settings.llm_retry_backoff,
             label="视觉/文档模型",
+            purpose=purpose,
             temperature=0.1,
             max_tokens=max_tokens,
             timeout=max(15, int(timeout)),
@@ -813,6 +816,7 @@ def summarize_document(text: str, settings: Settings, name: str) -> str:
         ],
         timeout=settings.llm_timeout,
         max_tokens=2400,
+        purpose=llmstats.PURPOSE_DOCUMENT,
     )
     data = _parse_document_json(raw)
     if not data:
@@ -847,6 +851,7 @@ def image_text(path: Path, settings: Settings) -> str:
         model=settings.vision_model,
         timeout=settings.http_timeout * 5,
         max_tokens=2000,
+        purpose=llmstats.PURPOSE_VISION,
     )
 
 
@@ -874,6 +879,7 @@ def image_bytes_text(raw: bytes, suffix: str, settings: Settings) -> str:
         model=settings.vision_model,
         timeout=settings.http_timeout * 5,
         max_tokens=2000,
+        purpose=llmstats.PURPOSE_VISION,
     )
 
 

@@ -18,7 +18,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 
-from qq_live_digest import providers
+from qq_live_digest import llmstats, providers
 
 SUPPORTED_EXTS = {".json", ".txt", ".md", ".html", ".htm", ".mht", ".mhtml", ".zip"}
 
@@ -1084,6 +1084,7 @@ def refine_items(
         retries=retries,
         backoff=backoff,
         label="文本模型精炼",
+        purpose=llmstats.PURPOSE_REFINE,
         temperature=0.1,
         max_tokens=3000,
     )

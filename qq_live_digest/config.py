@@ -142,6 +142,11 @@ class Settings:
     llm_defer_max_attempts: int = 3
     llm_defer_window_minutes: int = 15
 
+    # 成本统计（A5）：单价按「元 / 百万 token」计，仅用于把已记录的 token 折算成费用。
+    # 只影响展示，不改历史数据；不配置则只统计 token、费用显示为 0。
+    llm_price_in: float = 0.0
+    llm_price_out: float = 0.0
+
     # 群文件 / 群图片解析
     attachments_enabled: bool = True
     attachment_max_mb: int = 10
@@ -266,6 +271,8 @@ class Settings:
             llm_defer_window_minutes=max(
                 1, parse_int(get("QQ_DIGEST_LLM_DEFER_WINDOW_MINUTES", "15"), 15)
             ),
+            llm_price_in=max(0.0, parse_float(get("QQ_DIGEST_LLM_PRICE_IN", "0"), 0.0)),
+            llm_price_out=max(0.0, parse_float(get("QQ_DIGEST_LLM_PRICE_OUT", "0"), 0.0)),
             attachments_enabled=parse_bool(get("QQ_DIGEST_ATTACHMENTS", "1"), True),
             attachment_max_mb=max(1, parse_int(get("QQ_DIGEST_ATTACHMENT_MAX_MB", "10"), 10)),
             attachment_max_per_hour=max(
@@ -441,6 +448,8 @@ class Settings:
             "llm_timeout": self.llm_timeout,
             "llm_retries": self.llm_max_retries,
             "llm_defer_max_attempts": self.llm_defer_max_attempts,
+            "llm_price_in": self.llm_price_in,
+            "llm_price_out": self.llm_price_out,
             "include_raw": self.include_raw,
             "attachments": {
                 "enabled": bool(self.attachments_enabled and self.dashscope_api_key),

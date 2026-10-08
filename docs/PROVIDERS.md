@@ -13,8 +13,37 @@
 | `QQ_DIGEST_LLM_ENDPOINT` | 百炼兼容端点 | 任何 OpenAI 兼容的 `/chat/completions` |
 | `QQ_DIGEST_LLM_MODEL` | `qwen-plus` | 文本模型 |
 | `QQ_DIGEST_VL_MODEL` | `qwen3-vl-plus` | 视觉模型（走同一条通道，只是换模型名） |
+| `QQ_DIGEST_LLM_PRICE_IN` | `0` | 输入 token 单价，**元 / 百万 token**；只用于成本折算 |
+| `QQ_DIGEST_LLM_PRICE_OUT` | `0` | 输出 token 单价，**元 / 百万 token**；只用于成本折算 |
 
 `python main.py doctor` 会校验 Provider 名字，写错会直接 `FAIL` 并列出可选值。
+
+## 用量与成本（Roadmap A5）
+
+每次调用都会由 `providers.complete*_with_retries` 汇总成一条 `LLMCall`，交给
+`DigestService` 挂上的记录器写进 SQLite 的 `llm_calls` 表（不挂记录器就完全不写库，
+所以库外调用和单元测试不受影响）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `purpose` | 用途：`refine`（候选精炼）/ `vision`（图片识别）/ `document`（文档理解）/ `chat` |
+| `provider` / `model` | 实际应答的 Provider 与模型名（取 `LLMResult`，失败时取 Provider 自述） |
+| `prompt_tokens` / `completion_tokens` / `latency_ms` | 用量与耗时 |
+| `status` | `ok` / `error` / `skipped`（本该调用却跳过了，例如没配密钥） |
+| `attempts` / `retried` | 一次逻辑调用尝试了几次；是否发生过重试 |
+| `fallback` | 失败后调用方是否降级回本地规则（不阻塞推送） |
+| `error` | 失败原因（含异常类型） |
+
+日 / 周 / 月视图与费用折算：
+
+```powershell
+.\.venv\Scripts\python.exe main.py llm-stats --period day     # 默认：最近 14 天
+.\.venv\Scripts\python.exe main.py llm-stats --period week    # 最近 8 周
+.\.venv\Scripts\python.exe main.py llm-stats --period month --recent 10
+```
+
+费用按上面两个单价**在展示时**折算，不写进数据库，所以换价目表可以重算全部历史；
+单价留空时只统计 token（`doctor` 会提示）。
 
 ## 接别的 OpenAI 兼容端点（最常见）
 
@@ -72,6 +101,8 @@ providers.register_provider("my-vendor", factory)
 - **重试策略在调用方**：`providers.complete_with_retries` / `complete_json_with_retries`
   按 `llm_should_retry` 判定——限流、5xx、超时、返回内容不是 JSON 才重试；鉴权/参数错误立刻放弃。
 - **用量必须回传**：`LLMResult` 带 `model` 与 `prompt_tokens` / `completion_tokens` / `latency_ms`，
-  这是后续成本统计（Roadmap `A5`）的数据来源。新写 Provider 时请别丢这些字段。
+  成本统计（Roadmap `A5`）直接读它落库，新写 Provider 时请别丢这些字段。只要实现 `complete()`，
+  基类的 `complete_json_result()` 会顺带把用量交出来；如果覆写了 `complete_json()`，请让它继续
+  走 `complete_json_result()`（或自己保证用量不丢），否则「要 JSON」的那条路径统计不到。
 - **没有密钥就是不可用**：`build_provider()` 会返回 `NullProvider`，调用即失败并回退本地规则，
   不会静默返回空摘要。

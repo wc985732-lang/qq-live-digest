@@ -62,22 +62,40 @@ def call_with_retries(
     should_retry: Callable[[BaseException], bool] | None = None,
     logger: logging.Logger | None = None,
     label: str = "外部调用",
+    on_attempt: Callable[[int, T | None, BaseException | None], None] | None = None,
 ) -> T:
-    """执行 func；可恢复错误按指数退避重试，其余错误立刻抛出。"""
+    """执行 func；可恢复错误按指数退避重试，其余错误立刻抛出。
+
+    `on_attempt(次数, 结果, 异常)` 在每次尝试后回调，供用量统计（A5）记录每次请求；
+    回调自身抛出的异常不会影响重试逻辑。
+    """
     attempts = max(1, int(retries) + 1)
     log = logger or LOGGER
     allow = should_retry or (lambda _error: True)
     last: Exception | None = None
+
+    def _notify(number: int, value: T | None, error: BaseException | None) -> None:
+        if on_attempt is None:
+            return
+        try:
+            on_attempt(number, value, error)
+        except Exception:  # noqa: BLE001 - 统计失败不能影响主流程
+            log.debug("重试回调异常", exc_info=True)
+
     for attempt in range(attempts):
         if attempt:
             delay = max(0.0, float(backoff)) * (2 ** (attempt - 1))
             if delay:
                 time.sleep(delay)
         try:
-            return func()
+            value = func()
         except Exception as error:  # noqa: BLE001 - 是否重试交给 should_retry 判定
             last = error
+            _notify(attempt + 1, None, error)
             if attempt >= attempts - 1 or not allow(error):
                 raise
             log.warning("%s第 %d/%d 次失败，准备重试：%s", label, attempt + 1, attempts, error)
+        else:
+            _notify(attempt + 1, value, None)
+            return value
     raise LLMError(f"{label}失败：{last}")

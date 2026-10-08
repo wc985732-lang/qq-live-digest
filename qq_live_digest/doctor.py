@@ -17,6 +17,7 @@ import urllib.request
 from typing import Any, Callable, Iterable, Sequence
 
 from . import providers
+from . import llmstats
 from .bot import MISSING_BOTPY_HINT, botpy_available, botpy_version
 from .catchup import NapCatClient, NapCatError
 from .config import Settings
@@ -196,6 +197,44 @@ def check_storage(ctx: DoctorContext) -> Check:
     return Check("本地存储", OK, summary or "空库")
 
 
+def check_llm_usage(ctx: DoctorContext) -> Check:
+    """最近 24 小时的模型用量与成本：一眼看出「有没有调用、花了多少、失败几次」（A5）。"""
+    settings = ctx.settings
+    try:
+        summary = ctx.store().llm_call_summary(hours=24)
+    except Exception as error:  # noqa: BLE001 - doctor 不能因为统计失败就崩
+        return Check("模型用量", WARN, f"无法统计：{error}", "不影响摘要推送；稍后重试")
+    calls = int(summary.get("calls") or 0)
+    if not calls:
+        return Check("模型用量", OK, "最近 24 小时没有模型调用（未启用 / 未配密钥 / 没轮到需要 AI 的消息）")
+    prompt = int(summary.get("prompt_tokens") or 0)
+    completion = int(summary.get("completion_tokens") or 0)
+    cost = llmstats.call_cost(
+        prompt, completion, price_in=settings.llm_price_in, price_out=settings.llm_price_out
+    )
+    detail = (
+        f"24h 调用 {calls} 次 · 输入 {llmstats.format_tokens(prompt)}"
+        f" / 输出 {llmstats.format_tokens(completion)} token · 费用 {llmstats.format_cost(cost)}"
+    )
+    failed = int(summary.get("failed") or 0)
+    retried = int(summary.get("retried") or 0)
+    skipped = int(summary.get("skipped") or 0)
+    extras = []
+    if failed:
+        extras.append(f"失败 {failed}")
+    if retried:
+        extras.append(f"重试 {retried}")
+    if skipped:
+        extras.append(f"跳过 {skipped}")
+    if extras:
+        detail += " · " + "、".join(extras)
+    if failed:
+        return Check("模型用量", WARN, detail, "看明细：python main.py llm-stats --recent 20（失败会自动回退本地规则）")
+    if not (settings.llm_price_in or settings.llm_price_out):
+        return Check("模型用量", OK, detail, "想换算成费用请配置 QQ_DIGEST_LLM_PRICE_IN / _OUT（元/百万 token）")
+    return Check("模型用量", OK, detail)
+
+
 def check_napcat(ctx: DoctorContext) -> Check:
     settings = ctx.settings
     try:
@@ -341,6 +380,7 @@ def run_checks(ctx: DoctorContext) -> list[Check]:
         check_push(ctx),
         check_onebot(ctx),
         check_llm(ctx),
+        check_llm_usage(ctx),
         check_storage(ctx),
         check_napcat(ctx),
         check_receiver(ctx),

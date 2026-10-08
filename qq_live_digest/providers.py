@@ -16,6 +16,7 @@ from __future__ import annotations
 import abc
 import copy
 import json
+import logging
 import re
 import time
 import urllib.error
@@ -23,6 +24,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
+from . import llmstats
 from .retry import (
     LLMError,
     LLMRequestError,
@@ -30,6 +32,8 @@ from .retry import (
     call_with_retries,
     llm_should_retry,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 #: 配置里不写 `QQ_DIGEST_LLM_PROVIDER` 时的默认实现。
 DEFAULT_PROVIDER = "openai-compat"
@@ -49,6 +53,32 @@ class LLMResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     latency_ms: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return int(self.prompt_tokens) + int(self.completion_tokens)
+
+
+@dataclass(frozen=True)
+class LLMCall:
+    """一次**逻辑**调用的用量记录（Roadmap A5）。
+
+    一次逻辑调用 = 调用方发起的一次 `complete*_with_retries`。重试期间的每次尝试都算进
+    `attempts`，但只落一行：`retried` 表示是否真的重试过，`fallback` 表示失败后调用方
+    是否回退到了本地规则 / 跳过 AI 步骤，`error` 记录失败原因。
+    """
+
+    purpose: str = llmstats.PURPOSE_CHAT
+    provider: str = ""
+    model: str = ""
+    status: str = llmstats.STATUS_OK
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    latency_ms: int = 0
+    attempts: int = 1
+    retried: bool = False
+    fallback: bool = False
+    error: str = ""
 
     @property
     def total_tokens(self) -> int:
@@ -98,10 +128,23 @@ class LLMProvider(abc.ABC):
         timeout: int | None = None,
     ) -> dict[str, Any]:
         """要求模型返回 JSON 对象；解析失败抛 `LLMResponseError`。"""
+        return self.complete_json_result(
+            messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout
+        )[0]
+
+    def complete_json_result(
+        self,
+        messages: Messages,
+        *,
+        temperature: float = 0.1,
+        max_tokens: int = 3000,
+        timeout: int | None = None,
+    ) -> tuple[dict[str, Any], LLMResult]:
+        """同 `complete_json`，但把带用量的 `LLMResult` 一起交出来（成本统计要用）。"""
         result = self.complete(
             messages, temperature=temperature, max_tokens=max_tokens, timeout=timeout
         )
-        return extract_json_object(result.text)
+        return extract_json_object(result.text), result
 
     def for_model(self, model: str) -> "LLMProvider":
         """返回同一实现、换成指定模型的实例（如文本模型与视觉模型共用一条通道）。"""
@@ -275,6 +318,102 @@ def _openai_compat(settings: Any, *, model: str = "") -> LLMProvider:
 register_provider("openai-compat", _openai_compat)
 
 
+# ------------------------------------------------------------------ 用量记录（A5）
+#: 落库回调，由 `DigestService` 在构造时挂上 `store.add_llm_call`。
+#: 默认不记录：库外调用、单元测试不会被牵连，也不依赖数据库是否可写。
+_call_recorder: Callable[[LLMCall], None] | None = None
+
+
+def set_call_recorder(recorder: Callable[[LLMCall], None] | None) -> None:
+    """挂上 / 清空用量记录器。"""
+    global _call_recorder
+    _call_recorder = recorder
+
+
+def get_call_recorder() -> Callable[[LLMCall], None] | None:
+    return _call_recorder
+
+
+def report_call(call: LLMCall) -> None:
+    """把一条用量记录交给记录器；记录器出错只记日志，绝不影响摘要与推送。"""
+    recorder = _call_recorder
+    if recorder is None:
+        return
+    try:
+        recorder(call)
+    except Exception:  # noqa: BLE001 - 统计失败不能影响主流程
+        LOGGER.warning("写入模型用量失败", exc_info=True)
+
+
+def record_skip(*, purpose: str, reason: str, provider: str = "", model: str = "") -> None:
+    """记录一次「本该调用模型却跳过了」（如没配密钥）：让成本面板能解释「为什么一条都没有」。"""
+    report_call(
+        LLMCall(
+            purpose=purpose,
+            provider=provider or NULL_PROVIDER,
+            model=model,
+            status=llmstats.STATUS_SKIPPED,
+            attempts=0,
+            fallback=True,
+            error=str(reason or ""),
+        )
+    )
+
+
+def _as_result(value: Any) -> LLMResult | None:
+    """从一次尝试的返回值里取出 `LLMResult`（JSON 版返回的是 (数据, 结果) 元组）。"""
+    if isinstance(value, LLMResult):
+        return value
+    if isinstance(value, tuple) and value and isinstance(value[-1], LLMResult):
+        return value[-1]
+    return None
+
+
+class _CallTracker:
+    """把重试过程中的每次尝试汇总成一条 `LLMCall`。"""
+
+    def __init__(self, provider: LLMProvider, *, purpose: str, fallback_on_error: bool) -> None:
+        self.provider = provider
+        self.purpose = purpose
+        self.fallback_on_error = bool(fallback_on_error)
+        self.attempts = 0
+        self.result: LLMResult | None = None
+        self.error: BaseException | None = None
+        self.latency_ms = 0
+        self._clock = time.monotonic()
+
+    def observe(self, number: int, value: Any, error: BaseException | None) -> None:
+        now = time.monotonic()
+        self.latency_ms += max(0, int((now - self._clock) * 1000))
+        self._clock = now
+        self.attempts = max(self.attempts, int(number))
+        if error is None:
+            # 后续尝试成功即视为整次调用成功，之前失败的记录不该再拖累状态判断。
+            self.error = None
+            self.result = _as_result(value)
+        else:
+            self.error = error
+
+    def emit(self) -> None:
+        result = self.result
+        failed = self.error is not None
+        report_call(
+            LLMCall(
+                purpose=self.purpose,
+                provider=str(getattr(result, "provider", "") or getattr(self.provider, "name", "")),
+                model=str(getattr(result, "model", "") or getattr(self.provider, "model", "")),
+                status=llmstats.STATUS_ERROR if failed else llmstats.STATUS_OK,
+                prompt_tokens=int(getattr(result, "prompt_tokens", 0) or 0),
+                completion_tokens=int(getattr(result, "completion_tokens", 0) or 0),
+                latency_ms=self.latency_ms if failed else int(getattr(result, "latency_ms", 0) or 0),
+                attempts=max(1, self.attempts),
+                retried=self.attempts > 1,
+                fallback=bool(failed and self.fallback_on_error),
+                error=f"{type(self.error).__name__}: {self.error}" if failed else "",
+            )
+        )
+
+
 # ------------------------------------------------------------------ 重试包装
 def complete_with_retries(
     provider: LLMProvider,
@@ -283,16 +422,30 @@ def complete_with_retries(
     retries: int = 2,
     backoff: float = 1.5,
     label: str = "模型调用",
+    purpose: str = llmstats.PURPOSE_CHAT,
+    fallback_on_error: bool = True,
     **kwargs: Any,
 ) -> LLMResult:
-    """按 `llm_should_retry` 判定重试的调用（限流/5xx/超时/格式异常才重试）。"""
-    return call_with_retries(
-        lambda: provider.complete(messages, **kwargs),
-        retries=retries,
-        backoff=backoff,
-        should_retry=llm_should_retry,
-        label=label,
-    )
+    """按 `llm_should_retry` 判定重试的调用（限流/5xx/超时/格式异常才重试）。
+
+    `purpose` 用于成本面板分类；`fallback_on_error` 表示失败后调用方有本地回退路径
+    （用于区分「降级」与「直接失败」）。
+    """
+    tracker = _CallTracker(provider, purpose=purpose, fallback_on_error=fallback_on_error)
+    try:
+        result = call_with_retries(
+            lambda: provider.complete(messages, **kwargs),
+            retries=retries,
+            backoff=backoff,
+            should_retry=llm_should_retry,
+            label=label,
+            on_attempt=tracker.observe,
+        )
+    except BaseException:
+        tracker.emit()
+        raise
+    tracker.emit()
+    return result
 
 
 def complete_json_with_retries(
@@ -302,13 +455,24 @@ def complete_json_with_retries(
     retries: int = 2,
     backoff: float = 1.5,
     label: str = "模型调用",
+    purpose: str = llmstats.PURPOSE_CHAT,
+    fallback_on_error: bool = True,
     **kwargs: Any,
 ) -> dict[str, Any]:
-    """要 JSON 的重试版：连「返回内容不是 JSON」也一起重试。"""
-    return call_with_retries(
-        lambda: provider.complete_json(messages, **kwargs),
-        retries=retries,
-        backoff=backoff,
-        should_retry=llm_should_retry,
-        label=label,
-    )
+    """要 JSON 的重试版：连「返回内容不是 JSON」也一起重试。用量同样落库。"""
+    tracker = _CallTracker(provider, purpose=purpose, fallback_on_error=fallback_on_error)
+    try:
+        value = call_with_retries(
+            lambda: provider.complete_json_result(messages, **kwargs),
+            retries=retries,
+            backoff=backoff,
+            should_retry=llm_should_retry,
+            label=label,
+            on_attempt=tracker.observe,
+        )
+    except BaseException:
+        tracker.emit()
+        raise
+    tracker.emit()
+    data, _ = value
+    return data

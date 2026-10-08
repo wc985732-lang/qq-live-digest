@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from . import decisions
+from . import llmstats
 from .timeutil import iso, now_local, parse_iso
 
 LOGGER = logging.getLogger(__name__)
@@ -125,6 +126,24 @@ CREATE TABLE IF NOT EXISTS decisions (
 CREATE INDEX IF NOT EXISTS idx_decisions_msg ON decisions(msg_id, id);
 CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions(created_at);
 CREATE INDEX IF NOT EXISTS idx_decisions_outcome ON decisions(outcome, created_at);
+
+CREATE TABLE IF NOT EXISTS llm_calls (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at        TEXT NOT NULL,
+    purpose           TEXT NOT NULL DEFAULT '',
+    provider          TEXT NOT NULL DEFAULT '',
+    model             TEXT NOT NULL DEFAULT '',
+    status            TEXT NOT NULL DEFAULT 'ok',
+    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    latency_ms        INTEGER NOT NULL DEFAULT 0,
+    attempts          INTEGER NOT NULL DEFAULT 1,
+    retried           INTEGER NOT NULL DEFAULT 0,
+    fallback          INTEGER NOT NULL DEFAULT 0,
+    error             TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at);
+CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status, created_at);
 """
 
 
@@ -383,6 +402,89 @@ class Store:
                 (cutoff,),
             ).fetchall()
         return {str(row["outcome"] or "unknown"): int(row["total"] or 0) for row in rows}
+
+    # --------------------------------------------------------------- 模型用量
+    def add_llm_call(self, call: Any, *, created_at: Any = None) -> int:
+        """写入一条模型用量记录（Roadmap A5）。
+
+        `call` 是 `providers.LLMCall`（按字段鸭子类型读取，store 不反向依赖 providers）。
+        一次逻辑调用只落一行，重试次数记在 `attempts`，失败原因记在 `error`。
+        """
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO llm_calls (
+                    created_at, purpose, provider, model, status,
+                    prompt_tokens, completion_tokens, latency_ms,
+                    attempts, retried, fallback, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    iso(created_at or now_local()),
+                    str(getattr(call, "purpose", "") or ""),
+                    str(getattr(call, "provider", "") or ""),
+                    str(getattr(call, "model", "") or ""),
+                    str(getattr(call, "status", "") or llmstats.STATUS_OK),
+                    max(0, _as_int(getattr(call, "prompt_tokens", 0))),
+                    max(0, _as_int(getattr(call, "completion_tokens", 0))),
+                    max(0, _as_int(getattr(call, "latency_ms", 0))),
+                    max(0, _as_int(getattr(call, "attempts", 1), 1)),
+                    int(bool(getattr(call, "retried", False))),
+                    int(bool(getattr(call, "fallback", False))),
+                    str(getattr(call, "error", "") or "")[:500],
+                ),
+            )
+            return int(cursor.lastrowid or 0)
+
+    def llm_calls_between(self, start: Any, end: Any = None, *, limit: int = 0) -> list[dict[str, Any]]:
+        """按时间区间取用量明细（新→旧）；`end` 为空表示到最新。"""
+        sql = "SELECT * FROM llm_calls WHERE created_at >= ?"
+        params: list[Any] = [iso(start)]
+        if end is not None:
+            sql += " AND created_at < ?"
+            params.append(iso(end))
+        sql += " ORDER BY created_at DESC, id DESC"
+        if limit:
+            sql += " LIMIT ?"
+            params.append(max(1, int(limit)))
+        with self._connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def llm_calls_since(self, start: Any, *, limit: int = 0) -> list[dict[str, Any]]:
+        return self.llm_calls_between(start, None, limit=limit)
+
+    def recent_llm_calls(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM llm_calls ORDER BY id DESC LIMIT ?", (max(1, int(limit)),)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def llm_call_summary(self, *, hours: int = 24) -> dict[str, int]:
+        """最近 N 小时的用量小结（调用数 / 失败 / token / 耗时），供 doctor 一眼看。"""
+        window = max(1, int(hours))
+        cutoff = iso(now_local() - dt.timedelta(hours=window))
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) AS calls,
+                       SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS failed,
+                       SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS skipped,
+                       COALESCE(SUM(retried), 0) AS retried,
+                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                       COALESCE(SUM(latency_ms), 0) AS latency_ms
+                FROM llm_calls WHERE created_at >= ?
+                """,
+                (llmstats.STATUS_ERROR, llmstats.STATUS_SKIPPED, cutoff),
+            ).fetchone()
+        summary = {
+            key: int(row[key] or 0)
+            for key in ("calls", "failed", "skipped", "retried", "prompt_tokens", "completion_tokens", "latency_ms")
+        }
+        summary["hours"] = window
+        return summary
 
     def record_deferred(self, rows: Iterable[dict[str, Any]]) -> int:
         """写入 / 刷新「延后未决」过程行。
@@ -1301,6 +1403,7 @@ class Store:
             removed = cursor.rowcount or 0
             connection.execute("DELETE FROM processed WHERE msg_id NOT IN (SELECT msg_id FROM messages)")
             connection.execute("DELETE FROM decisions WHERE created_at < ?", (cutoff,))
+            connection.execute("DELETE FROM llm_calls WHERE created_at < ?", (cutoff,))
         return removed
 
     def counts(self) -> dict[str, int]:
@@ -1318,6 +1421,10 @@ class Store:
                 "decisions": scalar("SELECT COUNT(*) FROM decisions"),
                 "decisions_deferred": scalar(
                     "SELECT COUNT(*) FROM decisions WHERE outcome = ?", decisions.DEFERRED
+                ),
+                "llm_calls": scalar("SELECT COUNT(*) FROM llm_calls"),
+                "llm_calls_failed": scalar(
+                    "SELECT COUNT(*) FROM llm_calls WHERE status = ?", llmstats.STATUS_ERROR
                 ),
                 "deliveries_sent": scalar("SELECT COUNT(*) FROM deliveries WHERE status='sent'"),
                 "deliveries_failed": scalar("SELECT COUNT(*) FROM deliveries WHERE status='failed'"),

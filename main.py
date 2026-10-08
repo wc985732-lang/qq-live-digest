@@ -8,6 +8,7 @@
     python main.py send-test      # 发送一条测试推送，验证通道
     python main.py doctor         # 自检配置、数据库、机器人凭证
     python main.py stats          # 查看消息/摘要/投递统计
+    python main.py llm-stats      # 模型用量与成本：日 / 周 / 月视图
     python main.py attach-test X  # 解析一个群文件/图片，只打印摘要不推送
 """
 
@@ -38,6 +39,7 @@ from qq_live_digest.doctor import (  # noqa: E402
 )
 from qq_live_digest.attachments import IMAGE_EXTS, Attachment  # noqa: E402
 from qq_live_digest import decisions  # noqa: E402
+from qq_live_digest import llmstats  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
 from qq_live_digest.weburl import build_web_url  # noqa: E402
@@ -214,6 +216,85 @@ def command_decisions(args: argparse.Namespace) -> int:
         print(line)
     return 0
 
+
+
+def command_llm_stats(args: argparse.Namespace) -> int:
+    """看模型用量与成本：日 / 周 / 月视图（Roadmap A5）。
+
+    数据来自 `llm_calls` 表（每次调用记 provider/model/token/耗时/失败原因/是否重试降级）；
+    费用按当前配置的单价（元 / 百万 token）在展示时折算，改价不用重写历史。
+    """
+    settings = load_settings(args)
+    service = build_service(settings, console=False)
+    store = service.store
+    try:
+        period = llmstats.parse_period(args.period)
+    except ValueError as error:
+        print(str(error))
+        return 2
+    count = max(1, int(args.buckets or llmstats.DEFAULT_BUCKETS.get(period, 14)))
+    now = now_local()
+    start = llmstats.window_start(period, count, now=now)
+    rows = store.llm_calls_since(start)
+    buckets = llmstats.group_rows(rows, period, now=now, count=count)
+    totals = llmstats.totals_from_rows(rows)
+    price_in = float(settings.llm_price_in or 0.0)
+    price_out = float(settings.llm_price_out or 0.0)
+
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "period": period,
+                    "window_start": iso(start),
+                    "buckets": buckets,
+                    "totals": totals,
+                    "price": {"in_per_million": price_in, "out_per_million": price_out},
+                    "top_errors": llmstats.top_errors(rows, limit=5),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    print(
+        f"模型用量 · 按{llmstats.PERIOD_LABELS[period]}"
+        f"（最近 {count} 个周期，{iso(start).replace('T', ' ')[:16]} 起）"
+    )
+    if price_in or price_out:
+        print(f"单价：输入 ¥{price_in:g} / 百万 token · 输出 ¥{price_out:g} / 百万 token")
+    else:
+        print(
+            "单价未配置（QQ_DIGEST_LLM_PRICE_IN / QQ_DIGEST_LLM_PRICE_OUT，单位：元/百万 token），"
+            "当前只统计 token。"
+        )
+    print()
+    for line in llmstats.render_table(buckets, price_in=price_in, price_out=price_out):
+        print(line)
+    print()
+    print("合计：" + llmstats.summarise_bucket(totals, price_in=price_in, price_out=price_out))
+    if int(totals.get("calls") or 0):
+        print(f"用途分布：{llmstats.breakdown(totals.get('purposes') or {}, labels=llmstats.PURPOSE_LABELS)}")
+        print(f"模型分布：{llmstats.breakdown(totals.get('models') or {})}")
+    errors = llmstats.top_errors(rows, limit=3)
+    if errors:
+        print("失败原因 TOP：")
+        for reason, times in errors:
+            print(f"  {times}× {reason}")
+    elif not int(totals.get("calls") or 0):
+        print(
+            "还没有用量记录：这段时间模型没被调用过。跑一次 `main.py tick` 或 `main.py simulate` 再看，"
+            "也可以 `main.py doctor` 确认模型是否可用。"
+        )
+    if args.recent:
+        recent = store.recent_llm_calls(limit=args.recent)
+        if recent:
+            print()
+            print(f"最近 {len(recent)} 次调用（新 → 旧）：")
+            for line in llmstats.describe_calls(recent, price_in=price_in, price_out=price_out):
+                print(line)
+    return 0
 
 
 def command_simulate(args: argparse.Namespace) -> int:
@@ -513,6 +594,13 @@ def build_parser() -> argparse.ArgumentParser:
     why.add_argument("--hours", type=int, default=24, help="统计最近多少小时的结论分布")
     why.add_argument("--limit", type=int, default=0, help="最多显示多少条（列表默认 20，按消息查默认 50）")
     why.set_defaults(func=command_decisions)
+
+    usage = sub.add_parser("llm-stats", aliases=["cost"], help="模型用量与成本：日 / 周 / 月视图")
+    usage.add_argument("--period", default="day", help="统计粒度：day（默认）/ week / month")
+    usage.add_argument("--buckets", type=int, default=0, help="显示多少个周期（默认 日 14 / 周 8 / 月 6）")
+    usage.add_argument("--recent", type=int, default=0, help="额外列出最近 N 条调用明细")
+    usage.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
+    usage.set_defaults(func=command_llm_stats)
 
     tasks = sub.add_parser("tasks", help="查看待办清单和手机访问地址")
     tasks.add_argument("--all", action="store_true", help="包含已完成")

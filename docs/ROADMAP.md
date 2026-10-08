@@ -41,13 +41,13 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | 本地规则打分 → 候选 → 可选 LLM 两级处理 | 🟡 部分（无 Provider 抽象、无路由策略层） | `qq_digest.py` / `summarizer.py` |
 | 群文件/图片解析（PDF/Word/Excel/PPT/zip + OCR，OCR 不落盘） | ✅ 已上线 | `attachments.py` |
 | 跨群同通知去重、最近推送窗口二次去重 | ✅ 已上线 | `store.py` |
-| SQLite 结构化存储（messages/processed/digests/deliveries/tasks/task_events） | ✅ 已上线 | `store.py` |
+| SQLite 结构化存储（messages/processed/digests/deliveries/tasks/task_events/decisions/llm_calls） | ✅ 已上线 | `store.py` |
 | 多通道推送 + 失败回退（WxPusher/Server酱/PushPlus/Webhook/QQ私聊） | ✅ 已上线 | `push.py` |
 | 手机待办台（今天/本周/以后/已完成，完成/忽略/纠错/稍后提醒） | ✅ 已上线 | `webapp.py` (8766) |
 | 截止提醒（07:30 / 21:00）+ 周复盘 | ✅ 已上线 | `service.py` |
 | 重启后 24h 历史补采 + 定时补偿 | ✅ 已上线 | `catchup.py` |
 | 看门狗自动重启 + 微信告警 | ✅ 已上线 | 外部 `watchdog.ps1` |
-| CLI：run/tick/preview/stats/show/tasks/catchup/doctor/send-test/attach-test | ✅ 已上线 | `main.py` |
+| CLI：run/tick/preview/stats/show/tasks/catchup/doctor/send-test/attach-test/decisions/simulate/llm-stats | ✅ 已上线 | `main.py` |
 | CI 单元测试（GitHub Actions） | ✅ 已上线 | `.github/workflows/tests.yml` |
 | 开源工程化（MIT、Topics、v0.1.0 Release、protect-main、Dependabot、Secret Scanning） | ✅ 已上线 | GitHub 仓库设置 |
 
@@ -99,7 +99,7 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | # | 项目 | 现状 | V | S | C | R | M | I | 总分 | 工作量 | 依赖 |
 | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
 | A4 | 模型 Provider 抽象（`LLMProvider`/`LLMResult` + 注册表，业务层不直连 HTTP；`none` 可关闭） | ✅ | 5 | 5 | 4 | 3 | 4 | 3 | **4.25** | M | — |
-| A5 | Token/成本统计（provider/model/输入输出 token/耗时/失败原因，日周月视图） | ⬜ | 5 | 4 | 4 | 3 | 4 | 4 | **4.15** | M | A4 |
+| A5 | Token/成本统计（`llm_calls` 表 + `main.py llm-stats` 日/周/月视图：provider/model/输入输出 token/耗时/失败原因 + 是否重试/降级） | ✅ | 5 | 4 | 4 | 3 | 4 | 4 | **4.15** | M | A4 |
 | A8 | Human-in-the-loop（低置信度进待确认 + 确认/忽略/纠错反馈闭环） | 🟡 | 5 | 5 | 3 | 4 | 3 | 3 | **4.15** | M–L | A7 |
 | A7 | 置信度与可解释性（confidence + 触发规则 + 依据，UI 显示"为什么判为通知/待办"） | 🟡 | 4 | 5 | 4 | 4 | 3 | 4 | **4.10** | M | A33 |
 | A9 | 群级个性化策略（每群静默/关键词/等级/模型档/渠道/免打扰 + 默认继承） | 🟡 | 5 | 4 | 4 | 4 | 2 | 4 | **4.10** | M | — |
