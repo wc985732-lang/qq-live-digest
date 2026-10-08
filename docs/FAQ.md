@@ -119,6 +119,21 @@ Agent 属于未来的**上层可选能力**，不会反过来接管底层消息�
 实时接收需要 NapCat 与服务在线。关机期间只能依赖历史补采 / 恢复后的补偿机制（默认回溯 24 小时，
 由 `QQ_DIGEST_CATCHUP_HOURS` 控制）。
 
+### Q：装完之后它会不会一直在后台跑？怎么彻底卸载？
+
+它是一个**常驻后台服务**，这一点在安装时就写明了，不是隐藏行为：`install-task.ps1` 会注册登录时启动的计划任务
+`QQ-Live-Digest`（配套的 `run-hidden.vbs` 只是隐藏 PowerShell 窗口，不改变它做什么），和 NapCat 一起保证实时接收。
+
+彻底卸载：
+
+```powershell
+.\uninstall-task.ps1                                   # 删除自启计划任务
+Get-ScheduledTask NapCat-QQ* | Disable-ScheduledTask   # 按需：NapCat 相关任务
+```
+
+再删除仓库目录下的 `data/`（SQLite 数据库与附件缓存）和 `.env`（推送、模型的全部凭据）。
+删 `.env` 前确认这些 Key 没有在别处还要用。
+
 ### Q：关键词和内容能不能自定义？
 
 可以扩展为配置化规则（当前已有环境变量与群级策略雏形）。

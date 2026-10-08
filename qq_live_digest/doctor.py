@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, Iterable, Sequence
 
+from .bot import MISSING_BOTPY_HINT, botpy_available, botpy_version
 from .catchup import NapCatClient, NapCatError
 from .config import Settings
 from .store import Store
@@ -297,8 +298,21 @@ def check_access(ctx: DoctorContext) -> Check:
 
 
 def check_bot_credentials(ctx: DoctorContext) -> Check:
+    settings = ctx.settings
+    wants_bot = bool(settings.official_bot_enabled) and bool(settings.appid) and bool(settings.secret)
+    if wants_bot and not botpy_available():
+        # 配好了 AppID/Secret 却导不进 qq-botpy 时，官方机器人在运行期只会静默失效，必须显式报错。
+        return Check(
+            "QQ 官方机器人",
+            FAIL,
+            "已配置 AppID/Secret，但当前环境无法导入 qq-botpy",
+            MISSING_BOTPY_HINT,
+        )
     if ctx.bot_credential_check is None:
-        return Check("QQ 官方机器人", OK, "未做在线校验（加 --online 开启）")
+        detail = "未做在线校验（加 --online 开启）"
+        if wants_bot:
+            detail = f"qq-botpy {botpy_version()} 可导入；未做在线校验（加 --online 开启）"
+        return Check("QQ 官方机器人", OK, detail)
     passed, message = ctx.bot_credential_check()
     if passed:
         return Check("QQ 官方机器人", OK, message)

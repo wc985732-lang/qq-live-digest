@@ -312,6 +312,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File <NapCat目录>\watchdog.ps1
 - [发展规划 Roadmap](docs/ROADMAP.md)：项目唯一路线图入口，含评分模型与分阶段排期。
 - [常见问题 FAQ](docs/FAQ.md)：定位、模型、风控、部署等统一口径。
 - [故障演练手册](docs/DR-DRILL.md)：NapCat 掉线、模型故障、推送失败、进程被杀等场景怎么验证「不丢事」。
+- [安全边界与数据流向](docs/SECURITY-BOUNDARY.md)：四条数据路径、配置加固清单、依赖供应链核查与第三方审计核实结果。
 - [贡献指南](CONTRIBUTING.md)：分支、测试、代码风格、隐私与安全要求。
 - [安全政策](SECURITY.md)：如何私密报告安全问题。
 - [更新日志](CHANGELOG.md)：各版本变更记录。

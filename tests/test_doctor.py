@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from qq_live_digest import doctor as doctor_module  # noqa: E402
 from qq_live_digest.catchup import NapCatError  # noqa: E402
 from qq_live_digest.config import Settings  # noqa: E402
 from qq_live_digest.doctor import (  # noqa: E402
@@ -29,6 +30,7 @@ from qq_live_digest.doctor import (  # noqa: E402
     _mask_id,
     as_dicts,
     check_access,
+    check_bot_credentials,
     check_env_file,
     check_groups,
     check_llm,
@@ -300,6 +302,34 @@ class HelperTest(unittest.TestCase):
         text = render([Check("x", FAIL, "坏了", "去修")])
         self.assertIn("→ 去修", text)
         self.assertIn("1 项需处理", text)
+
+
+class BotDependencyTest(DoctorFixture):
+    """官方机器人的依赖与凭证检查（对应 2026-10-08 安全审计发现的 qq-botpy 缺失问题）。"""
+
+    def _bot_settings(self) -> Settings:
+        return _settings(appid="1234567890", secret="secret-value")
+
+    def test_credentials_without_botpy_is_fail(self) -> None:
+        original = doctor_module.botpy_available
+        doctor_module.botpy_available = lambda: False
+        self.addCleanup(setattr, doctor_module, "botpy_available", original)
+        check = check_bot_credentials(self.context(self._bot_settings()))
+        self.assertEqual(check.status, FAIL)
+        self.assertIn("qq-botpy", check.hint)
+
+    def test_credentials_with_botpy_is_ok(self) -> None:
+        original = doctor_module.botpy_available
+        doctor_module.botpy_available = lambda: True
+        self.addCleanup(setattr, doctor_module, "botpy_available", original)
+        check = check_bot_credentials(self.context(self._bot_settings()))
+        self.assertEqual(check.status, OK)
+        self.assertIn("qq-botpy", check.detail)
+
+    def test_unconfigured_bot_is_ok_without_online_check(self) -> None:
+        check = check_bot_credentials(self.context())
+        self.assertEqual(check.status, OK)
+        self.assertIn("未做在线校验", check.detail)
 
 
 if __name__ == "__main__":
