@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, Iterable, Sequence
 
+from . import providers
 from .bot import MISSING_BOTPY_HINT, botpy_available, botpy_version
 from .catchup import NapCatClient, NapCatError
 from .config import Settings
@@ -157,12 +158,25 @@ def check_onebot(ctx: DoctorContext) -> Check:
 
 def check_llm(ctx: DoctorContext) -> Check:
     settings = ctx.settings
+    name = providers.provider_name(settings)
+    if name != providers.NULL_PROVIDER and name not in providers.provider_names():
+        known = "、".join(providers.provider_names()) or "（无）"
+        return Check(
+            "大模型",
+            FAIL,
+            f"未知的模型 Provider：{name}",
+            f"QQ_DIGEST_LLM_PROVIDER 只能填 {known}，或填 none 关闭模型调用",
+        )
     if str(settings.dashscope_api_key or "").strip():
         extras = []
         if settings.attachments_enabled and settings.vision_enabled:
             extras.append(f"图片识别 {settings.vision_model}")
         suffix = f"，{'；'.join(extras)}" if extras else ""
-        return Check("大模型", OK, f"模型 {settings.dashscope_model}{suffix}（key 已配置）")
+        return Check(
+            "大模型",
+            OK,
+            f"Provider {name} · 模型 {settings.dashscope_model}{suffix}（key 已配置）",
+        )
     if settings.llm_enabled or settings.attachments_enabled:
         return Check(
             "大模型",

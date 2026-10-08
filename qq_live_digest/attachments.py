@@ -22,9 +22,7 @@ import socket
 import ssl
 import threading
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 import zipfile
 from collections import OrderedDict, deque
@@ -32,8 +30,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from . import providers
 from .config import Settings
-from .retry import LLMError, LLMRequestError, LLMResponseError, call_with_retries, llm_should_retry
+from .retry import LLMError
 from .timeutil import iso, now_local
 
 LOGGER = logging.getLogger(__name__)
@@ -740,55 +739,26 @@ def chat_completion(
     timeout: int = 60,
     max_tokens: int = 600,
 ) -> str:
-    if not settings.dashscope_api_key:
-        raise AttachmentError("未配置 DASHSCOPE_API_KEY")
-    payload = {
-        "model": model or settings.dashscope_model,
-        "temperature": 0.1,
-        "max_tokens": max_tokens,
-        "messages": messages,
-    }
-    if str(payload["model"]).lower().startswith("qwen3"):
-        payload["enable_thinking"] = False
+    """文本 / 视觉统一入口。
 
-    def attempt() -> str:
-        request = urllib.request.Request(
-            settings.dashscope_endpoint,
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {settings.dashscope_api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=max(15, int(timeout))) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:300]
-            raise LLMRequestError(
-                f"大模型 HTTP {error.code}: {detail}", status=int(error.code)
-            ) from error
-        except json.JSONDecodeError as error:
-            raise LLMResponseError(f"大模型返回非 JSON：{error}") from error
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            raise LLMRequestError(f"大模型请求失败：{error}") from error
-        try:
-            return str(body["choices"][0]["message"]["content"] or "").strip()
-        except (KeyError, IndexError, TypeError) as error:
-            raise LLMResponseError("大模型返回格式异常") from error
-
+    传输与重试交给 Provider（`qq_live_digest.providers`），本模块不再自己拼 HTTP 请求，
+    因此换模型供应商只改配置，不动这里的业务代码（Roadmap A4）。
+    """
+    provider = providers.build_provider(settings, model=model or settings.dashscope_model)
     try:
-        return call_with_retries(
-            attempt,
+        result = providers.complete_with_retries(
+            provider,
+            messages,
             retries=settings.llm_max_retries,
             backoff=settings.llm_retry_backoff,
-            should_retry=llm_should_retry,
-            logger=LOGGER,
             label="视觉/文档模型",
+            temperature=0.1,
+            max_tokens=max_tokens,
+            timeout=max(15, int(timeout)),
         )
     except LLMError as error:
         raise AttachmentError(str(error)) from error
+    return result.text
 
 
 def _parse_document_json(raw: str) -> dict[str, Any] | None:

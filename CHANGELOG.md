@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+### 新增
+- 新增**模型 Provider 抽象**（Roadmap `A4`）：`qq_live_digest/providers.py` 定义
+  `LLMProvider` / `LLMResult` / `NullProvider` / `OpenAICompatProvider` 与注册表；
+  `qq_digest`（候选精炼）与 `attachments`（文档/图片理解）不再自己拼 HTTP 请求，
+  换供应商只改配置。新增 `QQ_DIGEST_LLM_PROVIDER`（默认 `openai-compat`，`none` 可彻底关闭模型调用）、
+  `docs/PROVIDERS.md`、`tests/test_providers.py`（30 个用例，全程不联网），
+  `doctor` 新增 Provider 名校验。每次调用回传 model 与 token 用量，为 `A5` 成本统计留好接口。
+
 ## [0.2.0] - 2026-10-08
 
 Phase 0「可解释 + 可贡献」全部交付：安全边界文档与回归测试、决策日志、故障演练、

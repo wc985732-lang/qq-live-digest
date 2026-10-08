@@ -11,8 +11,6 @@ import html
 import json
 import re
 import sys
-import urllib.error
-import urllib.request
 import zipfile
 from dataclasses import dataclass
 from email import policy
@@ -20,12 +18,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 
-from qq_live_digest.retry import (
-    LLMRequestError,
-    LLMResponseError,
-    call_with_retries,
-    llm_should_retry,
-)
+from qq_live_digest import providers
 
 SUPPORTED_EXTS = {".json", ".txt", ".md", ".html", ".htm", ".mht", ".mhtml", ".zip"}
 
@@ -1032,96 +1025,67 @@ def build_llm_prompt(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return payload
 
 
-def refine_with_dashscope(
+def build_refine_messages(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """构造候选精炼的 chat messages（与具体供应商无关）。"""
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是大学生QQ群通知精简助手。只根据用户提供的消息工作，不猜测、不补造。"
+                "必须完整保留适用对象、条件、例外和不同人群的差异，不得把部分同学的通知概括成所有同学。"
+                "把闲聊和重复内容合并，只输出严格JSON对象，不要Markdown代码块。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "请把下列消息改写成适合手机推送的中文短摘要，输出 JSON："
+                '{"items":[{"id":1,"category":"urgent|action|academic|info",'
+                '"importance":1,"summary":"完整短摘要","audience":"适用对象",'
+                '"condition":"适用条件，没有则为空字符串","action":"需要做什么，没有则为空字符串",'
+                '"details":["按不同人群/条件/例外分别保留的要点"],'
+                '"deadline":"YYYY-MM-DD HH:MM 或 YYYY-MM-DD，没有则为空字符串","keep":true}]}\n'
+                "当前日期：" + dt.datetime.now().strftime("%Y-%m-%d %H:%M") + "。"
+                "要求：summary 不超过80个汉字，必须保留适用对象、条件和关键动作；"
+                "不要照抄原文，不要复述客套话，不要写“通知”“请注意”等空话。"
+                "audience 写清楚是谁，例如“刚转专业到本学院的同学；其他同学”；无法判断时写“未明确”。"
+                "condition 写清楚前提，例如“体测系统没有2026年成绩”；没有条件则留空。"
+                "details 必须按原文顺序分条保留不同人群、条件、例外、地点、附件、链接和注意事项，不得合并掉差异。"
+                "action 不超过60个汉字，没有明确行动就留空。"
+                "链接、附件名、地点如果重要，必须写进 summary、details 或 action；完整链接由程序单独保留。"
+                "category 规则：urgent=今天或明天必须处理；action=需要报名/提交/缴费等；"
+                "academic=考试/课程/教务；info=其他值得知悉的通知。"
+                "importance 为 1-5，越高越重要。keep=false 表示纯闲聊、重复或可忽略。\n"
+                "严禁把只针对部分人的要求写成“所有同学”；严禁遗漏截止时间、附件和例外条件。\n\n消息："
+                + json.dumps(build_llm_prompt(selected), ensure_ascii=False)
+            ),
+        },
+    ]
+
+
+def refine_items(
     items: list[dict[str, Any]],
-    api_key: str,
-    model: str,
-    endpoint: str,
-    timeout: int,
+    provider: "providers.LLMProvider",
     *,
     retries: int = 2,
     backoff: float = 1.5,
 ) -> list[dict[str, Any]]:
+    """用 provider 精炼候选条目：只改摘要相关字段，超出 50 条的尾部原样保留。
+
+    传输、JSON 解析与重试都在 provider 层完成，这里不碰 HTTP——
+    所以换模型供应商不需要改本文件（Roadmap A4）。
+    """
     if not items:
         return items
     selected = items[:50]
-    payload = {
-        "model": model,
-        "temperature": 0.1,
-        "max_tokens": 3000,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "你是大学生QQ群通知精简助手。只根据用户提供的消息工作，不猜测、不补造。"
-                    "必须完整保留适用对象、条件、例外和不同人群的差异，不得把部分同学的通知概括成所有同学。"
-                    "把闲聊和重复内容合并，只输出严格JSON对象，不要Markdown代码块。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    "请把下列消息改写成适合手机推送的中文短摘要，输出 JSON："
-                    '{"items":[{"id":1,"category":"urgent|action|academic|info",'
-                    '"importance":1,"summary":"完整短摘要","audience":"适用对象",'
-                    '"condition":"适用条件，没有则为空字符串","action":"需要做什么，没有则为空字符串",'
-                    '"details":["按不同人群/条件/例外分别保留的要点"],'
-                    '"deadline":"YYYY-MM-DD HH:MM 或 YYYY-MM-DD，没有则为空字符串","keep":true}]}\n'
-                    "当前日期：" + dt.datetime.now().strftime("%Y-%m-%d %H:%M") + "。"
-                    "要求：summary 不超过80个汉字，必须保留适用对象、条件和关键动作；"
-                    "不要照抄原文，不要复述客套话，不要写“通知”“请注意”等空话。"
-                    "audience 写清楚是谁，例如“刚转专业到本学院的同学；其他同学”；无法判断时写“未明确”。"
-                    "condition 写清楚前提，例如“体测系统没有2026年成绩”；没有条件则留空。"
-                    "details 必须按原文顺序分条保留不同人群、条件、例外、地点、附件、链接和注意事项，不得合并掉差异。"
-                    "action 不超过60个汉字，没有明确行动就留空。"
-                    "链接、附件名、地点如果重要，必须写进 summary、details 或 action；完整链接由程序单独保留。"
-                    "category 规则：urgent=今天或明天必须处理；action=需要报名/提交/缴费等；"
-                    "academic=考试/课程/教务；info=其他值得知悉的通知。"
-                    "importance 为 1-5，越高越重要。keep=false 表示纯闲聊、重复或可忽略。\n"
-                    "严禁把只针对部分人的要求写成“所有同学”；严禁遗漏截止时间、附件和例外条件。\n\n消息："
-                    + json.dumps(build_llm_prompt(selected), ensure_ascii=False)
-                ),
-            },
-        ],
-    }
-    if str(model or "").lower().startswith("qwen3"):
-        payload["enable_thinking"] = False
-
-    def attempt() -> dict[str, Any]:
-        request = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:500]
-            raise LLMRequestError(
-                f"LLM HTTP {error.code}: {detail}", status=int(error.code)
-            ) from error
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            raise LLMRequestError(f"LLM 请求失败: {error}") from error
-        content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
-        match = re.search(r"\{.*\}", content, re.S)
-        if not match:
-            raise LLMResponseError("LLM 未返回可解析的 JSON")
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError as error:
-            raise LLMResponseError(f"LLM JSON 解析失败: {error}") from error
-
-    data = call_with_retries(
-        attempt,
+    data = providers.complete_json_with_retries(
+        provider,
+        build_refine_messages(selected),
         retries=retries,
         backoff=backoff,
-        should_retry=llm_should_retry,
         label="文本模型精炼",
+        temperature=0.1,
+        max_tokens=3000,
     )
 
     refinements = {
@@ -1167,6 +1131,30 @@ def refine_with_dashscope(
         )
     )
     return kept
+
+
+def refine_with_dashscope(
+    items: list[dict[str, Any]],
+    api_key: str,
+    model: str,
+    endpoint: str,
+    timeout: int,
+    *,
+    retries: int = 2,
+    backoff: float = 1.5,
+) -> list[dict[str, Any]]:
+    """兼容旧签名：按参数现场构造一个 OpenAI 兼容 Provider。
+
+    新代码请用 `refine_items(items, providers.build_provider(settings))`，
+    这样「换供应商」才只需要改配置。
+    """
+    provider = providers.OpenAICompatProvider(
+        api_key=api_key,
+        endpoint=endpoint,
+        model=model,
+        timeout=timeout,
+    )
+    return refine_items(items, provider, retries=retries, backoff=backoff)
 
 
 def sort_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:

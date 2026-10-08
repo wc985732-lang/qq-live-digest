@@ -133,6 +133,7 @@ class Settings:
     dashscope_model: str = "qwen-plus"
     dashscope_endpoint: str = DEFAULT_DASHSCOPE_ENDPOINT
     llm_enabled: bool = True
+    llm_provider: str = "openai-compat"
     include_raw: bool = False
 
     # LLM 失败重试与降级：先原地重试，仍失败则推迟这一批，超过上限才回退本地规则。
@@ -252,6 +253,8 @@ class Settings:
             dashscope_endpoint=get("QQ_DIGEST_LLM_ENDPOINT", DEFAULT_DASHSCOPE_ENDPOINT).strip()
             or DEFAULT_DASHSCOPE_ENDPOINT,
             llm_enabled=parse_bool(get("QQ_DIGEST_LLM", "1"), True),
+            llm_provider=get("QQ_DIGEST_LLM_PROVIDER", "openai-compat").strip().lower()
+            or "openai-compat",
             include_raw=parse_bool(get("QQ_DIGEST_INCLUDE_RAW", "0"), False),
             llm_max_retries=max(0, parse_int(get("QQ_DIGEST_LLM_MAX_RETRIES", "2"), 2)),
             llm_retry_backoff=max(
@@ -434,6 +437,7 @@ class Settings:
             "push_openids": [_mask(item) for item in self.push_c2c_openids],
             "llm": bool(self.llm_enabled and self.dashscope_api_key),
             "llm_model": self.dashscope_model,
+            "llm_provider": self.llm_provider,
             "llm_timeout": self.llm_timeout,
             "llm_retries": self.llm_max_retries,
             "llm_defer_max_attempts": self.llm_defer_max_attempts,

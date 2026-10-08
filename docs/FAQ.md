@@ -48,7 +48,7 @@ Agent 属于未来的**上层可选能力**，不会反过来接管底层消息�
 ### Q：为什么用千问（Qwen）？
 
 主要考虑中文通知理解、视觉（图片）能力、成本和长期可用性。**不要把 Qwen 宣传成"一定最强"**——
-模型可替换是项目的明确方向（Provider 抽象，见 ROADMAP A4）。
+模型可替换是项目的既定设计，已实现（Provider 抽象，见 ROADMAP A4 与 `docs/PROVIDERS.md`）。
 
 ### Q：一定要 AI 才能运行吗？
 
@@ -60,8 +60,10 @@ Agent 属于未来的**上层可选能力**，不会反过来接管底层消息�
 
 ### Q：能不能换别的模型？
 
-应该能，也会做。长期方向是 Provider / Adapter 抽象，业务层不直接绑定某一家 SDK。
-当前代码默认走阿里云百炼（OpenAI 兼容接口），改 endpoint + key + model 即可对接兼容实现。
+能。模型层已抽象成 Provider（`qq_live_digest/providers.py`），业务代码不直接绑定任何一家 SDK。
+默认走阿里云百炼（OpenAI 兼容接口），任何兼容端点只要改 `QQ_DIGEST_LLM_ENDPOINT` 与模型名即可；
+非兼容协议按 `docs/PROVIDERS.md` 实现一个 `LLMProvider` 注册进去；设 `QQ_DIGEST_LLM_PROVIDER=none`
+可以彻底关掉模型调用，只跑本地规则。
 
 ### Q：能不能接 Cursor / Claude 等 Agent？
 

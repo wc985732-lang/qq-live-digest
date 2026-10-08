@@ -186,17 +186,22 @@ tick 几百次也只有一行，`reason` 保留最新一次的原因）。等它
 - `--online`：额外在线校验 QQ 官方机器人凭证（默认不联网校验）。
 - 自检**只读**：不会发送消息、不改配置；输出已脱敏，不含 token、`.env` 全文和真实群号，可直接贴到 Issue 里。
 
-## 百炼 AI 精简（推荐开启）
+## 模型精炼（推荐开启）
 
 在 `.env` 填入阿里云百炼的 `DASHSCOPE_API_KEY`，保持 `QQ_DIGEST_LLM=1`。推送会调用
 `QQ_DIGEST_LLM_MODEL` 指定的模型把通知改写成短摘要，默认不再附带原文：
 
-- `QQ_DIGEST_LLM_MODEL`：当前部署使用 `qwen3.8-max`，优先准确率；如果更在意成本，可改回 `qwen-plus`，改完重启。
-  `QQ-Live-Digest` 任务即可。
+- `QQ_DIGEST_LLM_MODEL`：当前部署使用 `qwen3.8-max`，优先准确率；如果更在意成本，
+  可改回 `qwen-plus`，改完重启 `QQ-Live-Digest` 任务即可。
 - `summary` 不超过 40 个汉字，只保留对象、事项、时间或行动。
 - `action` 不超过 20 个汉字，没有明确行动就留空。
 - `QQ_DIGEST_INCLUDE_RAW=0`：推送只显示精简摘要、截止时间、行动项和来源。
-- 百炼 API 失败时自动回退本地摘要，不会影响正常推送。
+- 模型 API 失败时自动回退本地摘要，不会影响正常推送。
+
+模型层是**可替换**的（Roadmap `A4`）：业务代码只依赖 `qq_live_digest/providers.py` 里的
+`LLMProvider` 接口，不自己拼 HTTP 请求。任何 OpenAI 兼容端点（Ollama / vLLM / OpenAI / 其他厂商）
+只要保持 `QQ_DIGEST_LLM_PROVIDER=openai-compat` 并改 `QQ_DIGEST_LLM_ENDPOINT` 就能接上；
+非兼容协议如何接入见 `docs/PROVIDERS.md`。设成 `QQ_DIGEST_LLM_PROVIDER=none` 可彻底关闭模型调用。
 
 ## 推送卡片与截止提醒
 

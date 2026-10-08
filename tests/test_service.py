@@ -502,7 +502,7 @@ class ServiceTest(unittest.TestCase):
         service.on_message(record("m1", "【学院通知】关于2026年国庆节放假安排的通知", minutes_ago=2))
 
         with mock.patch(
-            "qq_digest.refine_with_dashscope",
+            "qq_digest.refine_items",
             side_effect=LLMRequestError("LLM 请求失败: connection refused"),
         ):
             service.tick(now=NOW)
@@ -511,7 +511,7 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(store.meta_get("llm_defer:count"), "1")
 
         with mock.patch(
-            "qq_digest.refine_with_dashscope",
+            "qq_digest.refine_items",
             side_effect=lambda items, *args, **kwargs: items,
         ):
             service.tick(now=NOW + dt.timedelta(minutes=1))
@@ -536,7 +536,7 @@ class ServiceTest(unittest.TestCase):
         service.on_message(record("m1", "【学院通知】关于2026年国庆节放假安排的通知", minutes_ago=2))
 
         with mock.patch(
-            "qq_digest.refine_with_dashscope",
+            "qq_digest.refine_items",
             side_effect=LLMRequestError("LLM HTTP 401: bad key", status=401),
         ):
             service.tick(now=NOW)
