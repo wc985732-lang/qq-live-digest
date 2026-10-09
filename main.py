@@ -46,6 +46,7 @@ from qq_live_digest import confidence  # noqa: E402
 from qq_live_digest import decisions  # noqa: E402
 from qq_live_digest import events  # noqa: E402
 from qq_live_digest import grouppolicy  # noqa: E402
+from qq_live_digest import ics  # noqa: E402
 from qq_live_digest import llmstats  # noqa: E402
 from qq_live_digest import mcp  # noqa: E402
 from qq_live_digest import observe  # noqa: E402
@@ -529,6 +530,38 @@ def command_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_ics(args: argparse.Namespace) -> int:
+    """日历导出（Roadmap A13）：把有明确时间的待办导成 ICS，供手机 / 桌面日历订阅。"""
+    settings = load_settings(args)
+    ensure_dirs(settings)
+    store = Store(
+        settings.data_dir / "digest.sqlite3",
+        retention_days=settings.message_retention_days,
+    )
+    tasks = store.list_tasks()
+    now = now_local()
+    report = ics.payload(tasks, now=now, include_done=args.include_done)
+    if args.print:
+        # ICS 用 CRLF 行尾，必须走字节流，避免 Windows 文本模式再把 \n 翻译成 \r\n。
+        sys.stdout.buffer.write(
+            ics.build_calendar(tasks, now=now, include_done=args.include_done).encode("utf-8")
+        )
+        sys.stdout.buffer.flush()
+        return 0
+    target = Path(args.out) if args.out else (settings.data_dir / "calendar.ics")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(
+        ics.build_calendar(tasks, now=now, include_done=args.include_done).encode("utf-8")
+    )
+    if args.json:
+        print(json.dumps({**report, "path": str(target)}, ensure_ascii=False, indent=2))
+    else:
+        print(f"已导出 {report['events']} 个日程（全天 {report['all_day']} 个）到 {target}")
+        if report["first"]:
+            print(f"时间范围：{report['first']} → {report['last']}")
+    return 0
+
+
 def command_mcp(args: argparse.Namespace) -> int:
     """只读 MCP 接口（Roadmap A1）：stdio 给 Cursor / Claude 查询通知、待办、截止与历史消息。"""
     settings = load_settings(args)
@@ -976,6 +1009,13 @@ def build_parser() -> argparse.ArgumentParser:
     api_cmd = sub.add_parser("api", aliases=["rest"], help="只读 REST API（A15）：接口目录 / 鉴权状态 / 访问地址")
     api_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     api_cmd.set_defaults(func=command_api)
+
+    ics_cmd = sub.add_parser("ics", aliases=["calendar"], help="日历导出（A13）：把有明确时间的待办导成 ICS")
+    ics_cmd.add_argument("--out", default="", help="输出文件路径（默认 data/calendar.ics）")
+    ics_cmd.add_argument("--include-done", action="store_true", dest="include_done", help="包含已完成待办")
+    ics_cmd.add_argument("--print", action="store_true", dest="print", help="打印到标准输出，不写文件")
+    ics_cmd.add_argument("--json", action="store_true", help="以 JSON 输出摘要")
+    ics_cmd.set_defaults(func=command_ics)
 
     mcp_cmd = sub.add_parser("mcp", aliases=["mcp-serve"], help="只读 MCP 接口（A1）：stdio 给 Cursor / Claude 查询通知、待办、截止、历史消息")
     mcp_cmd.add_argument("--list-tools", action="store_true", dest="list_tools", help="只打印 Tool 定义（调试用），不启动 stdio 会话")

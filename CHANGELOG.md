@@ -20,6 +20,11 @@ Phase 2「信息中枢」的头三块：事件级跨群聚合（`A11`）、只�
   `todos` / `deadlines` / `search_messages`（关键词搜历史消息），没有任何写入、删除或发送能力；
   `main.py mcp --list-tools` 可离线打印 Tool 定义。新增 `qq_live_digest/mcp.py`（协议层纯函数，
   可脱离进程单测）；`search_messages` 的本地库查询落在 `store.search_messages`。
+- 新增**ICS / 日历导出**（Roadmap `A13`）：把「有明确时间的待办」导成 iCalendar（RFC 5545），
+  供手机 / 桌面日历下载或订阅。新增 `qq_live_digest/ics.py`（纯字符串处理，无 I/O）；`main.py ics`
+  （别名 `calendar`）写文件或 `--print` 到标准输出，待办台新增 `GET /api/calendar.ics`（token 鉴权，
+  `text/calendar`）。只有日期没有时刻的截止按**全天事件**（`VALUE=DATE`）导出，没有截止时间的待办
+  不导出；时间以浮动本地时间写出，不引入时区依赖。**只读**：只读 `tasks` 表，不写库、不联网、不改任务。
 - 新增**事件级跨群聚合**（Roadmap `A11`）：同一个事件被多个群先后转发时，不再各推一条，
   而是合成一条并标注来源群。判据不是字面相似，而是结构化的**事件键**——
   **对象 + 动作 + 时间 + 截止 + 来源**：对象取正文双字词，动作按行动词归一，

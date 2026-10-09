@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import confidence
+from . import ics
 from . import observe
 from . import restapi
 from .config import Settings
@@ -787,6 +788,21 @@ class _Handler(BaseHTTPRequestHandler):
                     include_done=self._query_flag("include_done"),
                 ),
             )
+            return
+        if path == "/api/calendar.ics":
+            body = ics.build_calendar(
+                self.store.list_tasks(),
+                now=now_local(),
+                include_done=self._query_flag("include_done"),
+            )
+            raw = body.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/calendar; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Disposition", 'attachment; filename="qq-digest.ics"')
+            self.end_headers()
+            self.wfile.write(raw)
             return
         if path in ("/", "/index.html"):
             self._html(PAGE_HTML)

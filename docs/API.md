@@ -21,9 +21,14 @@
 | GET | `/api/notifications` | 需要 | 最近的群通知摘要（正文截断到 600 字、不含发送者） |
 | GET | `/api/tasks` | 需要 | 待办清单（今天 / 本周 / 以后 / 已完成 / 待确认分组） |
 | GET | `/api/deadlines` | 需要 | 带截止时间的待办，按时间升序，标出逾期 |
+| GET | `/api/calendar.ics` | 需要 | 有明确时间的待办导出为 iCalendar（`text/calendar`） |
 | GET | `/api/panel` | 需要 | 消息处理可观测面板（脱敏聚合） |
 
 `/api/notices` 作为 `/api/notifications` 的历史别名保留，网页待办台仍在用。
+
+`/api/calendar.ics` 把有明确时间的待办导成 iCalendar（RFC 5545），可直接导入或订阅日历：
+时间以浮动本地时间写出，只有日期没有时刻的截止按**全天事件**（`VALUE=DATE`）导出，
+没有截止时间的待办不导出；`?include_done=1` 可把已完成待办也带上。同样是**只读**的。
 
 ## 查询参数
 

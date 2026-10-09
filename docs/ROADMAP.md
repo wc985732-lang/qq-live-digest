@@ -47,10 +47,11 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | 手机待办台（今天/本周/以后/已完成，完成/忽略/纠错/稍后提醒） | ✅ 已上线 | `webapp.py` (8766) |
 | 只读 REST API（/api /notifications /tasks /deadlines /health，token 鉴权） | ✅ 已上线 | `qq_live_digest/restapi.py` + `webapp.py` |
 | 只读 MCP 接口（4 只读 Tool：recent_notifications / todos / deadlines / search_messages） | ✅ 已上线 | `qq_live_digest/mcp.py` + `main.py mcp` |
+| ICS / 日历导出（有明确时间的待办导成 iCalendar，网页 + CLI） | ✅ 已上线 | `qq_live_digest/ics.py` + `main.py ics` |
 | 截止提醒（07:30 / 21:00）+ 周复盘 | ✅ 已上线 | `service.py` |
 | 重启后 24h 历史补采 + 定时补偿 | ✅ 已上线 | `catchup.py` |
 | 看门狗自动重启 + 微信告警 | ✅ 已上线 | 外部 `watchdog.ps1` |
-| CLI：run/tick/preview/stats/show/tasks/catchup/doctor/send-test/attach-test/decisions/simulate/llm-stats/groups/observe/events/api/mcp | ✅ 已上线 | `main.py` |
+| CLI：run/tick/preview/stats/show/tasks/catchup/doctor/send-test/attach-test/decisions/simulate/llm-stats/groups/observe/events/api/ics/mcp | ✅ 已上线 | `main.py` |
 | CI 单元测试（GitHub Actions） | ✅ 已上线 | `.github/workflows/tests.yml` |
 | 开源工程化（MIT、Topics、v0.1.0 Release、protect-main、Dependabot、Secret Scanning） | ✅ 已上线 | GitHub 仓库设置 |
 
@@ -117,7 +118,7 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | A11 | 事件级跨群聚合（event_key：对象+动作+时间+截止+来源，可拆分误合并） | ✅ | 5 | 5 | 3 | 3 | 3 | 3 | **4.00** | L | A33 |
 | A15 | 只读 REST API（/notifications /tasks /deadlines /health，token 鉴权） | ✅ | 4 | 5 | 4 | 3 | 4 | 3 | **3.95** | M | A28 |
 | A1 | MCP 只读接口（4 Tool：recent_notifications / todos / deadlines / search_messages） | ✅ | 3 | 5 | 4 | 4 | 5 | 3 | **3.90** | M | A15 |
-| A13 | ICS/日历导出（明确时间的通知生成 ICS，先下载/订阅） | ⬜ | 4 | 4 | 4 | 3 | 2 | 4 | **3.65** | M | — |
+| A13 | ICS/日历导出（明确时间的通知生成 ICS，先下载/订阅） | ✅ | 4 | 4 | 4 | 3 | 2 | 4 | **3.65** | M | — |
 | A14 | 多端推送扩展（Telegram/Discord/邮件/企业微信/ntfy + 失败回退） | 🟡 | 4 | 3 | 4 | 3 | 3 | 3 | **3.45** | M | — |
 | A22 | Prompt/模型 A/B（固定评测集，对比准确率/成本/延迟） | ⬜ | 3 | 4 | 3 | 3 | 3 | 3 | **3.20** | M | A21 |
 | A16 | PWA 离线能力（manifest/service worker/缓存/离线只读/安装引导） | 🟡 | 3 | 3 | 4 | 3 | 2 | 4 | **3.15** | M | — |

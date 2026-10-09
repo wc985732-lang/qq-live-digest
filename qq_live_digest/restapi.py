@@ -23,6 +23,7 @@ ENDPOINTS = (
     {"path": "/api/notifications", "method": "GET", "auth": True, "desc": "最近的群通知摘要（正文截断、脱敏）"},
     {"path": "/api/tasks", "method": "GET", "auth": True, "desc": "待办清单（今天 / 本周 / 以后 / 已完成）"},
     {"path": "/api/deadlines", "method": "GET", "auth": True, "desc": "带截止时间的待办，按时间升序"},
+    {"path": "/api/calendar.ics", "method": "GET", "auth": True, "desc": "有明确时间的待办导出为 iCalendar（ICS）"},
     {"path": "/api/panel", "method": "GET", "auth": True, "desc": "消息处理可观测面板（脱敏）"},
 )
 
