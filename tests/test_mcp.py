@@ -265,6 +265,12 @@ class CallToolTest(unittest.TestCase):
         self.assertEqual(payload["items"][0]["tool"], "b")
         self.assertFalse(payload["items"][0]["ok"])
 
+    def test_unknown_tool_returns_error_result(self) -> None:
+        result = mcp.call_tool(self.store, "no_such_tool", {})
+        self.assertTrue(result["isError"])
+        payload = json.loads(result["content"][0]["text"])
+        self.assertFalse(payload["ok"])
+
 
 class HandleMessageTest(unittest.TestCase):
     def setUp(self) -> None:

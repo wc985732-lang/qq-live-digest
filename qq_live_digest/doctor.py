@@ -20,6 +20,7 @@ from . import providers
 from . import llmstats
 from . import confidence
 from . import observe
+from . import redact
 from .bot import MISSING_BOTPY_HINT, botpy_available, botpy_version
 from .catchup import NapCatClient, NapCatError
 from .config import Settings
@@ -48,10 +49,7 @@ class Check:
 
 def _mask_id(value: Any) -> str:
     """群号/账号脱敏：只保留首尾各 2 位。"""
-    text = str(value or "")
-    if len(text) <= 4:
-        return "*" * len(text)
-    return f"{text[:2]}***{text[-2:]}"
+    return redact.mask_id(value)
 
 
 def _is_loopback(host: str) -> bool:

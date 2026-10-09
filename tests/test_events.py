@@ -96,6 +96,15 @@ class EventKeyTest(unittest.TestCase):
         self.assertFalse(events.compatible(first, other))
         self.assertFalse(events.compatible(first, events.event_parts(make_item("m4", "哈哈哈哈", "闲聊群"))))
 
+    def test_compatible_needs_more_overlap_without_anchor(self):
+        left = {"action": "", "time": (), "deadline": "", "source": (), "objects": {"组会", "通知", "报名"}}
+        right = {"action": "", "time": (), "deadline": "", "source": (), "objects": {"组会", "通知", "报名"}}
+        # 3 个共享对象词且无日期/来源/截止锚点：旧逻辑会误合，现在要求至少 4 个
+        self.assertFalse(events.compatible(left, right))
+        left4 = dict(left, objects={"组会", "通知", "报名", "签到"})
+        right4 = dict(right, objects={"组会", "通知", "报名", "签到"})
+        self.assertTrue(events.compatible(left4, right4))
+
 
 class MergeTest(unittest.TestCase):
     def test_merge_keeps_highest_score_and_records_sources(self):

@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
+from . import taskstatus
 from .timeutil import iso, now_local, parse_iso
 
 API_VERSION = "1"
@@ -27,6 +28,23 @@ ENDPOINTS = (
     {"path": "/api/conflicts", "method": "GET", "auth": True, "desc": "潜在时间冲突：截止时间相近的待办按组返回"},
     {"path": "/api/panel", "method": "GET", "auth": True, "desc": "消息处理可观测面板（脱敏）"},
 )
+
+
+def clamp_int(value: Any, default: int, low: int, high: int) -> int:
+    """把外部传入的整数限到 [low, high]；非法值用 default。HTTP / MCP / REST 共用一份。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(low, min(high, number))
+
+
+def _as_int(value: Any, default: int = 0) -> int:
+    """宽松取整：脏数据不抛异常。"""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def health_payload() -> dict[str, Any]:
@@ -47,10 +65,10 @@ def index_payload() -> dict[str, Any]:
 
 def notifications(store: Any, *, limit: int = 8) -> dict[str, Any]:
     """最近的摘要（通知）：只给标题级信息，正文截断，不带发送者。"""
-    count = max(1, min(50, int(limit or 8)))
+    count = clamp_int(limit or 8, 8, 1, 50)
     items: list[dict[str, Any]] = []
     for digest in store.recent_digests(limit=count):
-        item_count = int(digest.get("item_count") or 0)
+        item_count = _as_int(digest.get("item_count"))
         items.append(
             {
                 "id": digest.get("id"),
@@ -73,20 +91,20 @@ def deadlines(
 ) -> dict[str, Any]:
     """带截止时间的待办，按截止时间升序；标出是否已逾期与剩余小时数。"""
     stamp = now or now_local()
-    cap = max(1, min(1000, int(limit or 200)))
+    cap = clamp_int(limit or 200, 200, 1, 1000)
     rows: list[dict[str, Any]] = []
-    for task in store.list_tasks(include_done=bool(include_done)):
+    for task in store.list_tasks(statuses=taskstatus.statuses_for(bool(include_done))):
         moment = parse_iso(task.get("deadline"))
         if moment is None:
             continue
-        done = bool(task.get("done"))
+        done = taskstatus.is_done(task)
         rows.append(
             {
-                "id": int(task.get("id") or 0),
+                "id": _as_int(task.get("id")),
                 "summary": str(task.get("summary") or ""),
                 "action": str(task.get("action") or ""),
                 "category": str(task.get("category") or "info"),
-                "importance": int(task.get("importance") or 0),
+                "importance": _as_int(task.get("importance")),
                 "status": str(task.get("status") or ""),
                 "done": done,
                 "deadline": iso(moment),
@@ -115,22 +133,19 @@ def todos(
 ) -> dict[str, Any]:
     """待办清单（只读）：未完成在前、逾期优先、越重要越靠前。"""
     stamp = now or now_local()
-    cap = max(1, min(1000, int(limit or 200)))
-    if include_done:
-        tasks = store.list_tasks()
-    else:
-        tasks = store.list_tasks(statuses=("open", "candidate"))
+    cap = clamp_int(limit or 200, 200, 1, 1000)
+    tasks = store.list_tasks(statuses=taskstatus.statuses_for(bool(include_done)))
     items: list[dict[str, Any]] = []
     for task in tasks:
         moment = parse_iso(task.get("deadline"))
-        done = bool(task.get("done"))
+        done = taskstatus.is_done(task)
         items.append(
             {
-                "id": int(task.get("id") or 0),
+                "id": _as_int(task.get("id")),
                 "summary": str(task.get("summary") or ""),
                 "action": str(task.get("action") or ""),
                 "category": str(task.get("category") or "info"),
-                "importance": int(task.get("importance") or 0),
+                "importance": _as_int(task.get("importance")),
                 "status": str(task.get("status") or ""),
                 "done": done,
                 "candidate": str(task.get("status") or "") == "candidate",

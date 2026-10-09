@@ -16,6 +16,10 @@ def setup_logging(log_dir: Path, *, level: int = logging.INFO, console: bool = T
     root.setLevel(level)
     for handler in list(root.handlers):
         root.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:  # noqa: BLE001 - 关闭旧 handler 失败不应阻断重新配置
+            pass
 
     formatter = logging.Formatter(FORMAT)
     file_handler = logging.handlers.RotatingFileHandler(

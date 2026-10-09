@@ -52,6 +52,7 @@ from qq_live_digest import llmstats  # noqa: E402
 from qq_live_digest import mcp  # noqa: E402
 from qq_live_digest import observe  # noqa: E402
 from qq_live_digest import restapi  # noqa: E402
+from qq_live_digest import taskstatus  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
 from qq_live_digest.store import CORRECTION_LABELS, Store  # noqa: E402
@@ -540,7 +541,7 @@ def command_conflicts(args: argparse.Namespace) -> int:
         retention_days=settings.message_retention_days,
     )
     report = conflicts.payload(
-        store.list_tasks(),
+        store.list_tasks(statuses=taskstatus.statuses_for(args.include_done)),
         now=now_local(),
         window_minutes=args.window,
         include_done=args.include_done,
@@ -582,7 +583,7 @@ def command_ics(args: argparse.Namespace) -> int:
         settings.data_dir / "digest.sqlite3",
         retention_days=settings.message_retention_days,
     )
-    tasks = store.list_tasks()
+    tasks = store.list_tasks(statuses=taskstatus.statuses_for(args.include_done))
     now = now_local()
     report = ics.payload(tasks, now=now, include_done=args.include_done)
     if args.print:

@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Iterable
 
+from . import taskstatus
 from .timeutil import iso, now_local, parse_iso
 
 PRODID = "-//qq-live-digest//QQ digest tasks//CN"
@@ -32,16 +33,22 @@ def escape_text(value: Any) -> str:
 
 
 def fold_line(line: str) -> str:
-    """按 75 字节折行（续行以空格开头），按字节切以免拆坏多字节字符。"""
+    """按 75 字节折行（续行以空格开头）。
+
+    RFC 5545 的 75 字节上限**包含**续行前导的那个空格，所以从第二行起每行只放 74 字节；
+    按字节切以免拆坏多字节字符。
+    """
     if len(line.encode("utf-8")) <= MAX_LINE_OCTETS:
         return line
     segments: list[str] = []
     current = b""
+    limit = MAX_LINE_OCTETS
     for char in line:
         chunk = char.encode("utf-8")
-        if current and len(current) + len(chunk) > MAX_LINE_OCTETS:
+        if current and len(current) + len(chunk) > limit:
             segments.append(current.decode("utf-8"))
             current = b""
+            limit = MAX_LINE_OCTETS - 1
         current += chunk
     if current:
         segments.append(current.decode("utf-8"))
@@ -90,7 +97,9 @@ def build_events(
     duration = max(5, int(duration_minutes or DEFAULT_DURATION_MINUTES))
     events: list[dict[str, Any]] = []
     for task in tasks:
-        done = bool(task.get("done"))
+        if taskstatus.is_archived(task):
+            continue
+        done = taskstatus.is_done(task)
         if done and not include_done:
             continue
         moment = parse_iso(task.get("deadline"))

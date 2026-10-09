@@ -478,5 +478,51 @@ class MobileApiSecurityTest(unittest.TestCase):
         self.assertNotIn(self.token, html)
 
 
+class LoopbackAuthTest(unittest.TestCase):
+    """回环部署也必须鉴权：曾经的实现「绑 127.0.0.1 就不生成 token」是安全边界反转。"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = Store(Path(self.tmp.name) / "loop.sqlite3")
+        self.task_id = self.store.upsert_task(task_key="l1", summary="交表", category="action")
+        self.settings = Settings(web_host="127.0.0.1", web_port=0, web_token="")
+        self.server = TaskWebServer(self.settings, self.store)
+        self.assertTrue(self.server.token, "回环监听也必须自动生成 token")
+        self.assertTrue(self.server.start())
+        self.addCleanup(self.server.stop)
+        assert self.server.server is not None
+        self.base = f"http://127.0.0.1:{self.server.server.server_address[1]}"
+
+    def test_loopback_without_configured_token_is_not_open(self) -> None:
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(self.base + "/api/tasks", timeout=5)
+        self.assertEqual(error.exception.code, 401)
+
+    def _post(self, *, origin: str = "") -> int:
+        headers = {"Content-Type": "application/json", "X-Token": self.server.token}
+        if origin:
+            headers["Origin"] = origin
+        request = urllib.request.Request(
+            f"{self.base}/api/tasks/{self.task_id}",
+            data=json.dumps({"action": "done"}).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return int(response.status)
+        except urllib.error.HTTPError as error:
+            return int(error.code)
+
+    def test_cross_site_write_is_rejected(self) -> None:
+        self.assertEqual(self._post(origin="https://evil.example"), 403)
+        self.assertNotEqual(self.store.get_task(self.task_id)["status"], "done")
+
+    def test_same_origin_write_is_allowed(self) -> None:
+        self.assertEqual(self._post(origin=self.base), 200)
+        self.assertEqual(self.store.get_task(self.task_id)["status"], "done")
+
+
 if __name__ == "__main__":
     unittest.main()
