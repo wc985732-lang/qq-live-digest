@@ -377,7 +377,7 @@ class ServiceDecisionTest(unittest.TestCase):
         service.on_message(make_record("m1", NOTICE, minutes_ago=11))
         service.tick(now=NOW)
         self.assertEqual(self.pusher.calls, [])
-        rows = self.store.deferred_decisions()
+        rows = self.store.deferred_decisions(now=NOW)
         self.assertEqual([row["msg_id"] for row in rows], ["m1"])
         self.assertEqual(rows[0]["outcome"], decisions.DEFERRED)
         self.assertIn("延后", rows[0]["reason"])
@@ -388,7 +388,7 @@ class ServiceDecisionTest(unittest.TestCase):
         service = self._quiet_service()
         service.on_message(make_record("m1", NOTICE, minutes_ago=11))
         service.tick(now=NOW)
-        self.assertEqual(self.store.deferred_count(), 1)
+        self.assertEqual(self.store.deferred_count(now=NOW), 1)
         service.tick(now=NOW + dt.timedelta(hours=1, minutes=5))
         self.assertEqual(len(self.pusher.calls), 1)
         self.assertEqual(self.store.deferred_count(), 0)
@@ -411,7 +411,7 @@ class ServiceDecisionTest(unittest.TestCase):
         service.on_message(make_record("m1", NOTICE, minutes_ago=11))
         service.tick(now=NOW)
         self.assertEqual(self.pusher.calls, [])
-        row = self.store.deferred_decisions()[0]
+        row = self.store.deferred_decisions(now=NOW)[0]
         self.assertEqual(row["outcome"], decisions.DEFERRED)
         self.assertIn("额度", row["reason"])
 

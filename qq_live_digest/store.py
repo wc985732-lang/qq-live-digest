@@ -127,6 +127,12 @@ CREATE INDEX IF NOT EXISTS idx_decisions_msg ON decisions(msg_id, id);
 CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions(created_at);
 CREATE INDEX IF NOT EXISTS idx_decisions_outcome ON decisions(outcome, created_at);
 
+CREATE TABLE IF NOT EXISTS event_splits (
+    key        TEXT PRIMARY KEY,
+    reason     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS llm_calls (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at        TEXT NOT NULL,
@@ -424,8 +430,11 @@ class Store:
             rows = connection.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
 
-    def decision_counts(self, *, hours: int = 24) -> dict[str, int]:
-        cutoff = iso(now_local() - dt.timedelta(hours=max(1, int(hours))))
+    def decision_counts(
+        self, *, hours: int = 24, now: dt.datetime | None = None
+    ) -> dict[str, int]:
+        """按时间窗统计各结论条数；now 可注入，便于测试锁定参考时刻。"""
+        cutoff = iso((now or now_local()) - dt.timedelta(hours=max(1, int(hours))))
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT outcome, COUNT(*) AS total FROM decisions WHERE created_at >= ? GROUP BY outcome",
@@ -615,9 +624,11 @@ class Store:
                 touched += 1
         return touched
 
-    def deferred_decisions(self, *, limit: int = 30, hours: int = 24) -> list[dict[str, Any]]:
-        """当前还「延后未决」的消息（新 → 旧）。"""
-        cutoff = iso(now_local() - dt.timedelta(hours=max(1, int(hours))))
+    def deferred_decisions(
+        self, *, limit: int = 30, hours: int = 24, now: dt.datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """当前还「延后未决」的消息（新 → 旧）；now 可注入，便于测试锁定参考时刻。"""
+        cutoff = iso((now or now_local()) - dt.timedelta(hours=max(1, int(hours))))
         with self._connect() as connection:
             rows = connection.execute(
                 """
@@ -630,14 +641,55 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def deferred_count(self, *, hours: int = 24) -> int:
-        cutoff = iso(now_local() - dt.timedelta(hours=max(1, int(hours))))
+    def deferred_count(self, *, hours: int = 24, now: dt.datetime | None = None) -> int:
+        cutoff = iso((now or now_local()) - dt.timedelta(hours=max(1, int(hours))))
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT COUNT(*) FROM decisions WHERE outcome = ? AND created_at >= ?",
                 (decisions.DEFERRED, cutoff),
             ).fetchone()
         return int(row[0] or 0) if row else 0
+
+    # --------------------------------------------------- 事件级跨群聚合（A11）
+    def add_event_split(
+        self, key: str, *, reason: str = "", created_at: Any = None
+    ) -> bool:
+        """记一条「这个事件不要自动合并」的拆分覆盖（幂等）。"""
+        value = str(key or "").strip()
+        if not value:
+            return False
+        stamp = (
+            iso(created_at)
+            if isinstance(created_at, dt.datetime)
+            else str(created_at or iso(now_local()))
+        )
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO event_splits(key, reason, created_at) VALUES (?, ?, ?)",
+                (value, str(reason or ""), stamp),
+            )
+        return True
+
+    def remove_event_split(self, key: str) -> bool:
+        value = str(key or "").strip()
+        if not value:
+            return False
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM event_splits WHERE key = ?", (value,))
+        return cursor.rowcount > 0
+
+    def event_splits(self) -> list[dict[str, Any]]:
+        """所有拆分覆盖（新 → 旧）。"""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT key, reason, created_at FROM event_splits ORDER BY created_at DESC, key"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def event_split_keys(self) -> tuple[str, ...]:
+        return tuple(
+            str(row["key"]) for row in self.event_splits() if str(row.get("key") or "").strip()
+        )
 
     def oldest_unprocessed(self) -> str:
         with self._connect() as connection:
