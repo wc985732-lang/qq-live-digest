@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import confidence as confidence_mod
+from . import grouppolicy
 from . import llmstats
 
 #: 判定为「难例」前，最多几条候选还给轻量模型处理
@@ -94,6 +95,49 @@ def _local_is_enough(items: list[Mapping[str, Any]], settings: Any) -> bool:
     )
 
 
+def _group_of(items: list[Mapping[str, Any]]) -> tuple[str, str]:
+    """整批候选是否来自同一个群；是就返回 (群号, 群名)，否则返回空。"""
+    ids = {
+        str(item.get("group_id") or ((item.get("record") or {}) if isinstance(item.get("record"), dict) else {}).get("group_id") or "")
+        for item in items
+    }
+    if len(ids) != 1:
+        return "", ""
+    group_id = ids.pop()
+    name = ""
+    for item in items:
+        message = item.get("message")
+        name = str(item.get("group_name") or getattr(message, "source", "") or "")
+        if name:
+            break
+    return group_id, name
+
+
+def _pinned_decision(
+    items: list[Mapping[str, Any]], settings: Any, *, strong: str, light: str
+) -> RouteDecision | None:
+    """本群策略写死了模型档时优先照办（A9）；混群或没写就交回默认判据。"""
+    group_id, name = _group_of(items)
+    if not group_id and not name:
+        return None
+    try:
+        policy = settings.group_policy(group_id, name)
+    except Exception:  # noqa: BLE001 - 策略解析出错不该影响主流程
+        return None
+    if not policy.overridden or policy.model == grouppolicy.MODEL_DEFAULT:
+        return None
+    label = f"本群策略指定走{policy.model_label}"
+    if policy.model == grouppolicy.MODEL_RULE:
+        return RouteDecision(llmstats.ROUTE_RULE, label, "")
+    if policy.model == grouppolicy.MODEL_LIGHT:
+        if not light:
+            return None  # 本群要轻量模型但没配，交回默认判据（会走高能力模型）
+        return RouteDecision(llmstats.ROUTE_LIGHT, label, light)
+    if policy.model == grouppolicy.MODEL_STRONG:
+        return RouteDecision(llmstats.ROUTE_STRONG, label, strong)
+    return None
+
+
 def decide_route(
     items: Iterable[Mapping[str, Any]],
     settings: Any,
@@ -102,6 +146,9 @@ def decide_route(
     materialised = list(items)
     strong = _strong_model(settings)
     light = _light_model(settings)
+    pinned = _pinned_decision(materialised, settings, strong=strong, light=light)
+    if pinned is not None:
+        return pinned
     if not light:
         return RouteDecision(
             llmstats.ROUTE_STRONG,

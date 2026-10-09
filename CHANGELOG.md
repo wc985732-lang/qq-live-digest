@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### 新增
+- 新增**群级个性化策略**（Roadmap `A9`）：每个群可以在全局配置之上覆盖少量开关，
+  **没写的字段一律继承全局**，所以只改一个群不会牵连别的群。可覆盖：安静群（`quiet`）、
+  本群额外关键词（`keywords`，命中即按明确通知处理，安静群 / 免打扰时段也会放行）、
+  进摘要最低分（`min_score`）、模型档（`model`：`rule`/`light`/`strong`/`default`，对接 A6 分级路由）、
+  免打扰时段（`quiet_hours`，按**消息时间**算，支持跨零点）。
+  配置写在 `QQ_DIGEST_GROUP_POLICIES`（JSON，键可以是群号或群名）；新增
+  `qq_live_digest/grouppolicy.py`（纯函数：坏 JSON / 认不出的字段 / 非法时段只丢自己不抛异常）、
+  `main.py groups`（别名 `policies`，`--json`）逐群打印最终生效的开关与本群覆盖了哪些字段，
+  `doctor` 的「群白名单」一行提示其中几个群配了策略。原有的 `QQ_DIGEST_QUIET_GROUPS` 仍然生效，
+  只有被群策略显式写成 `"quiet": false` 时才让位；`min_score` 被覆盖后判定原因会改写成「本群阈值」。
+  模型档只对单个群的批次生效，混群批次或没配 `QQ_DIGEST_LLM_MODEL_LIGHT` 时回落默认判据。
+  *推送渠道的每群覆盖尚未纳入本项，留待后续。*
+  新增 `tests/test_grouppolicy.py`（40 个用例，全程不联网）。
 ## [0.3.0] - 2026-10-09
 
 Phase 1「AI 可控、可测、可替换」的**主体交付**（Roadmap `A4` / `A5` / `A6` / `A7` / `A21`）：

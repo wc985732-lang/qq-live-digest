@@ -20,6 +20,7 @@ from qq_digest import Message  # noqa: E402
 
 from . import decisions  # noqa: E402
 from . import confidence  # noqa: E402
+from . import grouppolicy  # noqa: E402
 from . import llmstats  # noqa: E402
 from . import providers  # noqa: E402
 from . import routing  # noqa: E402
@@ -176,11 +177,46 @@ def _item_group_name(item: dict[str, Any]) -> str:
     return str(item.get("group_name") or getattr(message, "source", "") or "")
 
 
+def _item_policy(item: dict[str, Any], settings: Settings) -> grouppolicy.GroupPolicy:
+    """本群解析后的策略（A9）：没写的字段继承全局。"""
+    return settings.group_policy(_item_group_id(item), _item_group_name(item))
+
+
+def _item_moment(item: dict[str, Any]) -> dt.datetime | None:
+    """这条消息的时间点；免打扰时段按它算，而不是按「现在」。"""
+    message: Message | None = item.get("message")
+    moment = getattr(message, "timestamp", None)
+    if isinstance(moment, dt.datetime):
+        return moment
+    record = item.get("record")
+    if isinstance(record, dict):
+        try:
+            parsed = parse_iso(record.get("ts"))
+        except Exception:  # noqa: BLE001 - 时间戳解析失败只是少一条免打扰判据
+            parsed = None
+        if isinstance(parsed, dt.datetime):
+            return parsed
+    return None
+
+
+def group_keyword_hit(item: dict[str, Any], policy: grouppolicy.GroupPolicy) -> str:
+    """命中的本群关键词；没配关键词或没命中返回空串。"""
+    message: Message | None = item.get("message")
+    return grouppolicy.keyword_hit(policy, str(getattr(message, "text", "") or ""))
+
+
 def is_quiet_group_item(item: dict[str, Any], settings: Settings) -> bool:
-    group_id = _item_group_id(item)
-    if group_id and settings.is_quiet_group(group_id):
+    """安静群判定（A9 起按群策略）：群关键词命中算明确通知；免打扰时段内按安静群处理。"""
+    policy = _item_policy(item, settings)
+    if group_keyword_hit(item, policy):
+        return False
+    if policy.quiet:
         return True
-    return settings.is_quiet_group_name(_item_group_name(item))
+    if policy.quiet_hours:
+        moment = _item_moment(item)
+        if moment is not None and grouppolicy.in_quiet_hours(policy, moment):
+            return True
+    return False
 
 
 def is_notice_item(item: dict[str, Any], settings: Settings) -> bool:
@@ -309,6 +345,9 @@ def focus_reason(analysis: dict[str, Any], settings: Settings) -> str:
     """
     if bool(analysis.get("colloquial_question")):
         return "像闲聊提问，未命中指令式通知"
+    policy = _item_policy(analysis, settings)
+    if group_keyword_hit(analysis, policy):
+        return ""  # 群关键词命中，按明确通知处理（A9）
     if is_quiet_group_item(analysis, settings) and not is_notice_item(analysis, settings):
         return "安静群且未命中通知关键词"
     score = int(analysis.get("score") or 0)
@@ -316,9 +355,12 @@ def focus_reason(analysis: dict[str, Any], settings: Settings) -> str:
         if score >= 1:
             return ""
         return f"紧急类但分值 {score} < 1"
-    if score >= settings.min_score:
+    threshold = int(policy.min_score or settings.min_score)
+    if score >= threshold:
         return ""
-    return f"分值 {score} < 阈值 {settings.min_score}"
+    if threshold != int(settings.min_score):
+        return f"分值 {score} < 本群阈值 {threshold}"
+    return f"分值 {score} < 阈值 {threshold}"
 
 
 def is_focus(analysis: dict[str, Any], settings: Settings) -> bool:

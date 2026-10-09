@@ -128,7 +128,12 @@ def check_groups(ctx: DoctorContext) -> Check:
     shown = "、".join(_mask_id(item) for item in groups[:3])
     if len(groups) > 3:
         shown += f" 等 {len(groups)} 个"
-    return Check("群白名单", OK, f"{len(groups)} 个群：{shown}（已脱敏）")
+    detail = f"{len(groups)} 个群：{shown}（已脱敏）"
+    policies = dict(ctx.settings.group_policies or {})
+    if policies:
+        detail += f" · 其中 {len(policies)} 个配了群策略"
+        return Check("群白名单", OK, detail, "看每群生效的开关：python main.py groups")
+    return Check("群白名单", OK, detail, "想让某个群安静 / 加关键词 / 单独设最低分：python main.py groups")
 
 
 def check_push(ctx: DoctorContext) -> Check:

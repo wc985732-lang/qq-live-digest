@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
+from . import grouppolicy
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_DASHSCOPE_ENDPOINT = (
@@ -119,6 +121,7 @@ class Settings:
     group_whitelist: tuple[str, ...] = ()
     group_aliases: Mapping[str, str] = field(default_factory=dict)
     quiet_groups: tuple[str, ...] = ()
+    group_policies: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     immediate_groups: tuple[str, ...] = ()
     push_c2c_openids: tuple[str, ...] = ()
 
@@ -251,6 +254,7 @@ class Settings:
             group_whitelist=split_list(get("QQ_DIGEST_GROUPS")),
             group_aliases=parse_aliases(get("QQ_DIGEST_GROUP_ALIASES")),
             quiet_groups=split_list(get("QQ_DIGEST_QUIET_GROUPS")),
+            group_policies=grouppolicy.parse_policies(get("QQ_DIGEST_GROUP_POLICIES")),
             immediate_groups=split_list(get("QQ_DIGEST_IMMEDIATE_GROUPS")),
             push_c2c_openids=split_list(get("QQ_DIGEST_PUSH_OPENIDS")),
             wxpusher_app_token=get("WXPUSHER_APP_TOKEN").strip(),
@@ -370,17 +374,18 @@ class Settings:
     def is_immediate_group(self, group_id: str) -> bool:
         return str(group_id or "") in self.immediate_groups
 
+    def group_policy(self, group_id: str, name: str = "") -> grouppolicy.GroupPolicy:
+        """本群解析后的策略：没写的字段继承全局（A9）。"""
+        return grouppolicy.resolve(str(group_id or ""), str(name or ""), self)
+
     def is_quiet_group(self, group_id: str) -> bool:
-        return str(group_id or "") in self.quiet_groups
+        return self.group_policy(group_id).quiet
 
     def is_quiet_group_name(self, name: str) -> bool:
         target = str(name or "").strip()
         if not target:
             return False
-        return any(
-            target == str(group_id) or self.group_name(str(group_id)) == target
-            for group_id in self.quiet_groups
-        )
+        return self.group_policy("", target).quiet
 
     def quiet_hours_range(self) -> tuple[int, int] | None:
         """返回 (起始分钟, 结束分钟)；未配置或非法时返回 None。"""
@@ -450,6 +455,13 @@ class Settings:
             "groups": list(self.group_whitelist) or ["<未配置：不处理任何群>"],
             "group_aliases": dict(self.group_aliases),
             "quiet_groups": list(self.quiet_groups),
+            "group_policies": {
+                str(key): {
+                    str(field_name): (list(value) if isinstance(value, tuple) else value)
+                    for field_name, value in dict(entry).items()
+                }
+                for key, entry in self.group_policies.items()
+            },
             "immediate_groups": list(self.immediate_groups),
             "push_channels": self.push_channels(),
             "push_openids": [_mask(item) for item in self.push_c2c_openids],

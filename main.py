@@ -11,6 +11,7 @@
     python main.py llm-stats      # 模型用量与成本：日 / 周 / 月视图
     python main.py benchmark      # 跑脱敏评测集，输出召回 / 误报 / 延迟 / 成本基线
     python main.py feedback       # 人工反馈回收：候选确认 / 忽略 / 纠错闭环
+    python main.py groups         # 群级策略：每个群最终生效的开关（安静群 / 关键词 / 最低分 / 模型档）
     python main.py attach-test X  # 解析一个群文件/图片，只打印摘要不推送
 """
 
@@ -42,6 +43,7 @@ from qq_live_digest.doctor import (  # noqa: E402
 from qq_live_digest.attachments import IMAGE_EXTS, Attachment  # noqa: E402
 from qq_live_digest import confidence  # noqa: E402
 from qq_live_digest import decisions  # noqa: E402
+from qq_live_digest import grouppolicy  # noqa: E402
 from qq_live_digest import llmstats  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
@@ -376,6 +378,66 @@ def command_feedback(args: argparse.Namespace) -> int:
             print(f"  {line}")
     elif corrected:
         print("暂时没有成规模的纠错模式，继续收集反馈即可。")
+    return 0
+
+
+def command_groups(args: argparse.Namespace) -> int:
+    """群级个性化策略（Roadmap A9）：每个群最终生效的开关分别是什么。"""
+    settings = load_settings(args)
+    groups = [str(item) for item in settings.group_whitelist if str(item or "").strip()]
+    policies = dict(settings.group_policies or {})
+    rows = []
+    for group_id in groups:
+        name = settings.group_name(group_id)
+        policy = settings.group_policy(group_id, name)
+        rows.append(
+            {
+                "group_id": group_id,
+                "name": name,
+                "matched": policy.matched,
+                "overrides": list(policy.overrides),
+                "quiet": policy.quiet,
+                "keywords": list(policy.keywords),
+                "min_score": policy.min_score,
+                "model": policy.model,
+                "model_label": policy.model_label,
+                "quiet_hours": policy.quiet_hours,
+                "describe": policy.describe(),
+            }
+        )
+    used = {row["matched"] for row in rows if row["matched"]}
+    unused = sorted(key for key in policies if key not in used)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "groups": rows,
+                    "unused_policies": unused,
+                    "fields": list(grouppolicy.FIELDS),
+                    "models": dict(grouppolicy.MODEL_LABELS),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if not rows:
+        print("还没有配置任何群（QQ_DIGEST_GROUPS），没有群需要策略。")
+        return 0
+    print(f"群级策略 · {len(rows)} 个群（没写的字段继承全局）")
+    for row in rows:
+        if row["overrides"]:
+            mark = "本群覆盖：" + "、".join(row["overrides"])
+        else:
+            mark = "全部继承全局"
+        print(f"  {row['group_id']}（{row['name']}）  {row['describe']}")
+        print(f"    {mark}")
+    if unused:
+        print("以下策略键没有匹配到白名单群：" + "、".join(unused))
+        print("  键要写群号或群名，而且群必须在 QQ_DIGEST_GROUPS 白名单里才会被处理。")
+    if not any(row["overrides"] for row in rows):
+        print("提示：QQ_DIGEST_GROUP_POLICIES 是 JSON，例如")
+        print('  {"123456": {"quiet": true, "min_score": 5, "keywords": ["考试"]}}')
     return 0
 
 
@@ -733,6 +795,10 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--days", type=int, default=30, help="统计最近多少天（默认 30）")
     review.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     review.set_defaults(func=command_feedback)
+
+    groups = sub.add_parser("groups", aliases=["policies"], help="群级策略：每个群最终生效的开关")
+    groups.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
+    groups.set_defaults(func=command_groups)
 
     tasks = sub.add_parser("tasks", help="查看待办清单和手机访问地址")
     tasks.add_argument("--all", action="store_true", help="包含已完成")

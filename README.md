@@ -46,7 +46,7 @@
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
-| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / simulate |
+| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / groups / simulate |
 
 ## 环境要求
 
@@ -128,6 +128,9 @@ cd <项目目录>
 
 # 人工反馈回收：候选确认率 / 忽略率 / 纠错类型 / 按群规则建议
 .\.venv\Scripts\python.exe main.py feedback --days 30
+
+# 群级策略：每个群最终生效的安静群 / 关键词 / 最低分 / 模型档 / 免打扰
+.\.venv\Scripts\python.exe main.py groups
 
 # 假群聊回放：500 条消息走完整链路，一条真实推送都不发（不联网、不碰 data/）
 .\.venv\Scripts\python.exe main.py simulate --count 500
@@ -233,6 +236,37 @@ A7 之前归档的老摘要没有这条记录，`show` 会如实写「这条没�
 
 它**只汇总与建议，不自动改配置**——「怎么改规则」始终由人决定。
 `doctor` 的「反馈闭环」一行给出近 30 天的候选 / 确认 / 忽略 / 纠错概况。
+
+### 群级个性化策略 `main.py groups`
+
+一个群一个脾气：有的群只该收通知、有的群要多盯几个关键词、有的群夜里干脆别打扰。
+`A9` 让每个群在全局配置之上覆盖少量开关，**没写的字段一律继承全局**——只改一个群不会牵连别的群。
+
+| 字段 | 作用 | 默认（继承自） |
+| --- | --- | --- |
+| `quiet` | 安静群：只留明确通知，普通讨论不入摘要 / 待办 | `QQ_DIGEST_QUIET_GROUPS` |
+| `keywords` | 本群额外关键词，命中即视为明确通知（安静 / 免打扰也会放行） | 全局词表 |
+| `min_score` | 本群进摘要的最低分 | `QQ_DIGEST_MIN_SCORE` |
+| `model` | 本群走哪一档模型：`rule` / `light` / `strong` / `default`，对接 `A6` 分级路由 | 路由判据 |
+| `quiet_hours` | 本群免打扰时段，按**消息时间**算，支持跨零点（如 `23:00-06:30`） | 不继承，只在本群写时生效 |
+
+配置写在一条 JSON 环境变量 `QQ_DIGEST_GROUP_POLICIES` 里，键写群号或群名都行：
+
+```ini
+QQ_DIGEST_GROUP_POLICIES={"123456": {"quiet": true, "min_score": 5, "keywords": ["考试", "选课"]}, "学院通知群": {"model": "light", "quiet_hours": "23:00-06:30"}}
+```
+
+```powershell
+.\.venv\Scripts\python.exe main.py groups           # 逐群打印最终生效的开关，以及本群覆盖了哪些字段
+.\.venv\Scripts\python.exe main.py groups --json    # 交给脚本消费
+```
+
+坏 JSON / 认不出的字段 / 非法时段只会丢掉自己，不会让程序报错。原有的 `QQ_DIGEST_QUIET_GROUPS`
+仍然生效，只有被群策略显式写成 `"quiet": false` 时才让位；`min_score` 被覆盖后，决策原因会改写成
+「分值 X < 本群阈值 Y」。模型档只对**单个群的批次**生效：混群批次、或写了 `light` 但没配
+`QQ_DIGEST_LLM_MODEL_LIGHT` 时，都回落到默认路由判据。推送渠道的每群覆盖尚未纳入本项。
+
+`doctor` 的「群白名单」一行会提示有几个群配了策略。
 
 ### 假群聊回放 `main.py simulate`
 
