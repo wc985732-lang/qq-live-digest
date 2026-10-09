@@ -24,7 +24,10 @@ from qq_live_digest.store import Store  # noqa: E402
 from qq_live_digest.timeutil import iso  # noqa: E402
 from qq_live_digest.webapp import TaskWebServer  # noqa: E402
 
-NOW = dt.datetime(2026, 9, 30, 9, 0, 0)
+# 固定 +08:00 偏移：DTSTAMP 要按 UTC 写出，若用裸 datetime 会吃运行机器的本地时区，
+# 在 UTC 的 CI runner 上会把 09:00 当成 09:00Z。显式带时区让断言与机器无关。
+CST = dt.timezone(dt.timedelta(hours=8))
+NOW = dt.datetime(2026, 9, 30, 9, 0, 0, tzinfo=CST)
 
 
 def _task(**overrides):
