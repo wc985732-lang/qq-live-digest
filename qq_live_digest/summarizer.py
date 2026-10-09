@@ -19,6 +19,7 @@ import qq_digest  # noqa: E402  (需要先修好 sys.path)
 from qq_digest import Message  # noqa: E402
 
 from . import decisions  # noqa: E402
+from . import confidence  # noqa: E402
 from . import llmstats  # noqa: E402
 from . import providers  # noqa: E402
 from .config import Settings  # noqa: E402
@@ -98,6 +99,8 @@ class Digest:
                     "sender": message.sender,
                     "text": message.text,
                     "msg_id": item.get("msg_id", ""),
+                    "confidence": dict(item.get("confidence") or {}),
+                    "why": str(item.get("why") or ""),
                 }
             )
         return items
@@ -141,6 +144,8 @@ def payload_to_item(entry: dict[str, Any]) -> dict[str, Any]:
         "group_id": str(entry.get("group_id") or ""),
         "msg_id": str(entry.get("msg_id") or ""),
     }
+    item["confidence"] = dict(entry.get("confidence") or {})
+    item["why"] = str(entry.get("why") or "")
     if not item["evidence"]:
         item["evidence"] = evidence_sentence(text, item)
     return item
@@ -240,33 +245,10 @@ def classify_task_item(item: dict[str, Any], settings: Settings) -> dict[str, An
     )
     urgent = category == "urgent"
     tags = set(item.get("tags") or ())
-    score = int(item.get("score") or 0)
     quiet = is_quiet_group_item(item, settings)
 
-    confidence = 0.28
-    if has_deadline:
-        confidence += 0.25
-    if strong_directive:
-        confidence += 0.20
-    if direct_action:
-        confidence += 0.14
-    if urgent:
-        confidence += 0.10
-    if category == "action":
-        confidence += 0.08
-    if evidence:
-        confidence += 0.05
-    if score >= 4:
-        confidence += 0.05
-    if weak:
-        confidence -= 0.24
-    if ambiguous:
-        confidence -= 0.14
-    if quiet:
-        confidence -= 0.08
-    if not direct_action:
-        confidence -= 0.08
-    confidence = round(max(0.05, min(0.98, confidence)), 2)
+    # 分数与「为什么」同源：权重写在触发规则里，改权重就改解释，不会各说各话。
+    assessment = confidence.assess_task(item, quiet=quiet, evidence=evidence)
 
     status = "candidate"
     reason = "只有行动线索，证据还不够直接，先放到待确认。"
@@ -288,7 +270,14 @@ def classify_task_item(item: dict[str, Any], settings: Settings) -> dict[str, An
     elif not has_deadline and direct_action:
         reason = "识别到行动，但没有明确截止时间，先确认是否真的要办。"
 
-    return {"status": status, "confidence": confidence, "reason": reason, "source": str(item.get("source") or "qq_message")}
+    return {
+        "status": status,
+        "confidence": assessment.confidence,
+        "level": assessment.level,
+        "triggers": list(assessment.triggers),
+        "reason": reason,
+        "source": str(item.get("source") or "qq_message"),
+    }
 
 
 def focus_reason(analysis: dict[str, Any], settings: Settings) -> str:
@@ -533,7 +522,7 @@ def _prepare_items(
                 llm_retryable = llm_should_retry(error)
                 LOGGER.warning("LLM 精炼失败，回退本地规则：%s", error)
     return (
-        _finalize_items(qq_digest.sort_items(candidates)),
+        _finalize_items(qq_digest.sort_items(candidates), settings, llm_used=llm_used),
         llm_used,
         llm_error,
         llm_retryable,
@@ -574,8 +563,13 @@ def evidence_sentence(text: str, item: dict[str, Any] | None = None, limit: int 
     return sentences[0][:limit]
 
 
-def _finalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """补齐摘要/待办/截止/重要度字段，保证推送与归档一致。"""
+def _finalize_items(
+    items: list[dict[str, Any]],
+    settings: Settings | None = None,
+    *,
+    llm_used: bool = False,
+) -> list[dict[str, Any]]:
+    """补齐摘要/待办/截止/重要度字段，并给出「为什么判为通知」（A7）。"""
     for item in items:
         message: Message = item["message"]
         if not item.get("summary"):
@@ -594,6 +588,14 @@ def _finalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             item["evidence"] = evidence_sentence(message.text, item)
         if not item.get("importance"):
             item["importance"] = IMPORTANCE_BY_CATEGORY.get(str(item.get("category")), 3)
+        assessment = confidence.assess_notice(
+            item,
+            settings,
+            authoritative=settings is not None and is_notice_item(item, settings),
+            llm_used=llm_used,
+        )
+        item["confidence"] = confidence.to_payload(assessment)
+        item["why"] = item["confidence"]["why"]
     return items
 
 
@@ -675,6 +677,11 @@ def format_push_text(digest: Digest, settings: Settings) -> str:
             lines.append("   " + " · ".join(details))
 
         links = qq_digest.extract_links(message.text)
+        why = str(item.get("why") or "")
+        if why:
+            note = str((item.get("confidence") or {}).get("text") or "")
+            suffix = f"（{note}）" if note else ""
+            lines.append(f"   为什么：{_clip(why, 48)}{suffix}")
         if links:
             lines.append(f"   链接：{links[0]}")
         if settings.include_raw:
@@ -777,6 +784,14 @@ def html_push_text(digest: Digest, settings: Settings) -> str:
             block.append(
                 '<div style="font-size:12px;color:#5f6368;margin-top:3px">'
                 f"{html_escape(_clip(context_text, 90))}</div>"
+            )
+        why = str(item.get("why") or "")
+        if why:
+            note = str((item.get("confidence") or {}).get("text") or "")
+            suffix = f"（{note}）" if note else ""
+            block.append(
+                '<div style="font-size:11px;color:#8a8f98;margin-top:4px">'
+                f"为什么：{html_escape(_clip(why, 60))}{html_escape(suffix)}</div>"
             )
         if evidence and evidence not in summary:
             block.append(

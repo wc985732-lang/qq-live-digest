@@ -11,6 +11,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from . import confidence
 from .config import Settings
 from .store import Store
 from .timeutil import iso, now_local, parse_iso
@@ -376,6 +377,7 @@ function taskNode(task) {
   }
   if (candidate) {
     body.appendChild(el('div', 'confidence', (task.confidence_text || '') + ' · ' + (task.confidence_reason || '')));
+    if (task.confidence_why) body.appendChild(el('div', 'confidence', '依据：' + task.confidence_why));
     var actions = el('div', 'actions');
     var confirm = actionButton('确认待办', 'confirm', 'primary');
     var dismiss = actionButton('忽略', 'dismiss', 'ghost');
@@ -575,17 +577,6 @@ def _deadline_label(value: dt.datetime | None, now: dt.datetime) -> tuple[str, b
     return f"{value:%m-%d %H:%M} 截止", overdue and value.date() < now.date()
 
 
-def _confidence_text(task: dict[str, Any]) -> str:
-    confidence = float(task.get("confidence") or 0.0)
-    if confidence >= 0.75:
-        level = "把握较高"
-    elif confidence >= 0.55:
-        level = "把握中等"
-    else:
-        level = "把握较低"
-    return f"{level} {round(confidence * 100)}%"
-
-
 def snooze_default_until(settings: Settings, now: dt.datetime) -> str:
     """稍后提醒的默认时间：次日早晨的截止提醒时刻，否则次日同一时间。"""
     target = now + dt.timedelta(days=1)
@@ -620,13 +611,18 @@ def group_tasks(tasks: list[dict[str, Any]], now: dt.datetime) -> dict[str, Any]
         )
         payload["done"] = status == "done"
         if status == "candidate":
-            payload["confidence_text"] = _confidence_text(payload)
+            payload["confidence_text"] = confidence.confidence_text(
+                float(payload.get("confidence") or 0.0)
+            )
             detail = str(payload.get("candidate_detail") or "")
             try:
                 parsed = json.loads(detail) if detail else {}
             except json.JSONDecodeError:
                 parsed = {}
             payload["confidence_reason"] = str(parsed.get("reason") or "需要你确认后再进入正式待办。")
+            payload["confidence_why"] = confidence.describe_triggers(
+                parsed.get("triggers") or [], limit=3
+            )
             candidate.append(payload)
             continue
         if payload["done"]:

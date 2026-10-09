@@ -64,13 +64,20 @@ _RULE_FIELDS = (
 def rule_hits(analysis: Mapping[str, Any], *, limit: int = 3) -> list[str]:
     """把一次分析结果压成「命中了什么」的短列表，用于人读与回归对比。"""
     hits = [str(tag) for tag in sorted(str(tag) for tag in (analysis.get("tags") or ()) if str(tag).strip())]
+    hits.extend(word_hits(analysis, limit=limit))
+    deadline = analysis.get("deadline")
+    if deadline is not None:
+        hits.append(f"截止:{deadline}")
+    return hits
+
+
+def word_hits(analysis: Mapping[str, Any], *, limit: int = 3) -> list[str]:
+    """只要「撞上了哪个词表」——紧急词 / 行动词 / 学术词 / 管理词（不含裸标签）。"""
+    hits: list[str] = []
     for key, label in _RULE_FIELDS:
         words = [str(word) for word in (analysis.get(key) or ()) if str(word).strip()]
         if words:
             hits.append(f"{label}:{'/'.join(words[:limit])}")
-    deadline = analysis.get("deadline")
-    if deadline is not None:
-        hits.append(f"截止:{deadline}")
     return hits
 
 

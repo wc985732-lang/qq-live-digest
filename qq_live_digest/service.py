@@ -5,10 +5,12 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import html
+import json
 import logging
 import threading
 from typing import Any
 
+from . import confidence
 from . import decisions
 from . import providers
 from .bot import BotRunner
@@ -35,6 +37,19 @@ GATE_REASON_TEXT = {
     "quiet_hours": "夜间静默时段",
     "daily_budget": "当日推送额度已用完",
 }
+
+
+def _candidate_reason(task: dict[str, Any]) -> str:
+    """候选卡片的「为什么」：优先用入库的触发规则，退回分类理由（A7）。"""
+    raw = str(task.get("candidate_detail") or "")
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    why = confidence.describe_triggers(parsed.get("triggers") or [], limit=3)
+    return why or str(parsed.get("reason") or "")
 
 
 class DigestService:
@@ -664,8 +679,8 @@ class DigestService:
             return 0
         sent = 0
         for task in self.store.list_tasks(statuses=("candidate",), limit=30):
-            confidence = float(task.get("confidence") or 0.0)
-            if confidence < self.settings.candidate_min_confidence:
+            confidence_value = float(task.get("confidence") or 0.0)
+            if confidence_value < self.settings.candidate_min_confidence:
                 continue
             snooze_until = parse_iso(task.get("snooze_until"))
             if isinstance(snooze_until, dt.datetime) and snooze_until > stamp:
@@ -679,12 +694,22 @@ class DigestService:
             evidence = str(task.get("evidence") or summary)
             deadline = str(task.get("deadline") or "")[:16].replace("T", " ") or "未识别"
             groups = "、".join(task.get("groups") or []) or "来源群未知"
-            body = (
-                f"可能要做：{summary}\n"
-                f"来源：{groups}\n"
-                f"推测截止：{deadline}\n"
-                f"依据：{evidence}\n"
-                f"打开待办台确认：{link}"
+            why = _candidate_reason(task)
+            reasons = [
+                f"可能要做：{summary}",
+                f"来源：{groups}",
+                f"推测截止：{deadline}",
+                f"依据：{evidence}",
+                f"判断把握：{confidence.confidence_text(confidence_value)}",
+            ]
+            if why:
+                reasons.append(f"为什么：{why}")
+            reasons.append(f"打开待办台确认：{link}")
+            body = "\n".join(reasons)
+            why_html = (
+                f'<div style="font-size:12px;color:#9ca3af;margin-top:2px">{html.escape(why)}</div>'
+                if why
+                else ""
             )
             html_body = (
                 '<div style="padding:12px;border-radius:10px;'
@@ -693,6 +718,9 @@ class DigestService:
                 f'<div style="font-size:15px;color:#111827;font-weight:600;margin-top:4px">{html.escape(summary)}</div>'
                 f'<div style="font-size:12px;color:#6b7280;margin-top:6px">{html.escape(evidence[:100])}</div>'
                 f'<div style="font-size:12px;color:#6b7280;margin-top:4px">{html.escape(groups)} · 推测截止 {html.escape(deadline)}</div>'
+                f'<div style="font-size:12px;color:#6b7280;margin-top:4px">'
+                f"判断把握：{html.escape(confidence.confidence_text(confidence_value))}</div>"
+                f"{why_html}"
                 f'<div style="margin-top:8px"><a href="{html.escape(link)}" style="color:#4f46e5">在待办台确认或忽略</a></div>'
                 "</div>"
             )
@@ -708,7 +736,7 @@ class DigestService:
             if delivered_now or already_delivered:
                 self.store.mark_task_reminded(
                     task_id,
-                    detail={"kind": "candidate_confirmation", "confidence": confidence},
+                    detail={"kind": "candidate_confirmation", "confidence": confidence_value},
                     when=stamp,
                 )
                 if delivered_now:
@@ -1014,6 +1042,10 @@ class DigestService:
                 confidence=float(classification.get("confidence") or 0.0),
                 source=source,
                 classification_reason=str(classification.get("reason") or ""),
+                classification_detail={
+                    "level": str(classification.get("level") or ""),
+                    "triggers": [str(value) for value in (classification.get("triggers") or ())],
+                },
             )
             if task_id:
                 item["task_id"] = task_id

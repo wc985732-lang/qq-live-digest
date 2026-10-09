@@ -18,6 +18,7 @@ from typing import Any, Callable, Iterable, Sequence
 
 from . import providers
 from . import llmstats
+from . import confidence
 from .bot import MISSING_BOTPY_HINT, botpy_available, botpy_version
 from .catchup import NapCatClient, NapCatError
 from .config import Settings
@@ -235,6 +236,22 @@ def check_llm_usage(ctx: DoctorContext) -> Check:
     return Check("模型用量", OK, detail)
 
 
+def check_confidence(ctx: DoctorContext) -> Check:
+    """候选置信度分布：每条候选都带把握度与判定依据（A7）。"""
+    try:
+        tasks = ctx.store().list_tasks(statuses=("candidate",), limit=200)
+    except Exception as error:  # noqa: BLE001 - 统计失败不该拖垮 doctor
+        return Check("候选置信度", WARN, f"无法统计：{error}", "不影响摘要推送；稍后重试")
+    total = len(tasks)
+    if not total:
+        return Check("候选置信度", OK, "当前没有待确认候选（每张候选卡片都会带把握度与判定依据）")
+    low = sum(1 for task in tasks if float(task.get("confidence") or 0.0) < confidence.DEFAULT_LOW)
+    high = sum(1 for task in tasks if float(task.get("confidence") or 0.0) >= confidence.DEFAULT_HIGH)
+    detail = f"待确认 {total} 条 · 把握较高 {high} · 建议人工确认 {low}"
+    hint = "低置信度不会自动进待办：在待办台确认或忽略（python main.py web）" if low else ""
+    return Check("候选置信度", OK, detail, hint)
+
+
 def check_napcat(ctx: DoctorContext) -> Check:
     settings = ctx.settings
     try:
@@ -381,6 +398,7 @@ def run_checks(ctx: DoctorContext) -> list[Check]:
         check_onebot(ctx),
         check_llm(ctx),
         check_llm_usage(ctx),
+        check_confidence(ctx),
         check_storage(ctx),
         check_napcat(ctx),
         check_receiver(ctx),

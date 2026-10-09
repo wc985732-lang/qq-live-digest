@@ -9,7 +9,7 @@ import sqlite3
 import datetime as dt
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Mapping
 
 from . import decisions
 from . import llmstats
@@ -862,6 +862,7 @@ class Store:
         confidence: float = 0.0,
         source: str = "",
         classification_reason: str = "",
+        classification_detail: Mapping[str, Any] | None = None,
     ) -> int:
         """写入或更新任务；重复出现时保留用户处理过的状态。"""
         key = str(task_key or "").strip()
@@ -875,6 +876,11 @@ class Store:
         groups_json = json.dumps(list(dict.fromkeys(group_list)), ensure_ascii=False)
         detail_list = [str(value) for value in details if str(value or "").strip()]
         details_json = json.dumps(detail_list, ensure_ascii=False)
+        extra = {
+            str(key): value
+            for key, value in dict(classification_detail or {}).items()
+            if value not in (None, "", (), [], {})
+        }
         with self._connect() as connection:
             existing = connection.execute(
                 "SELECT id, status FROM tasks WHERE task_key = ?", (key,)
@@ -914,7 +920,12 @@ class Store:
                     connection,
                     task_id,
                     "created",
-                    {"status": status, "confidence": float(confidence or 0.0), "reason": classification_reason},
+                    {
+                        "status": status,
+                        "confidence": float(confidence or 0.0),
+                        "reason": classification_reason,
+                        **extra,
+                    },
                     created_at=stamp,
                 )
                 if status == "candidate":
@@ -922,7 +933,11 @@ class Store:
                         connection,
                         task_id,
                         "candidate_detected",
-                        {"confidence": float(confidence or 0.0), "reason": classification_reason},
+                        {
+                            "confidence": float(confidence or 0.0),
+                            "reason": classification_reason,
+                            **extra,
+                        },
                         created_at=stamp,
                     )
                 return task_id

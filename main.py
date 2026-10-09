@@ -38,6 +38,7 @@ from qq_live_digest.doctor import (  # noqa: E402
     worst_status,
 )
 from qq_live_digest.attachments import IMAGE_EXTS, Attachment  # noqa: E402
+from qq_live_digest import confidence  # noqa: E402
 from qq_live_digest import decisions  # noqa: E402
 from qq_live_digest import llmstats  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
@@ -175,6 +176,14 @@ def command_show(args: argparse.Namespace) -> int:
                 print(f"     来源：{item['group']}")
             if item.get("evidence"):
                 print(f"     依据：{item['evidence']}")
+            info = item.get("confidence") or {}
+            why = str(item.get("why") or info.get("why") or "")
+            if info or why:
+                note = str(info.get("text") or "")
+                suffix = f"（{note}）" if note else ""
+                print(f"     为什么：{why or '没有命中任何规则'}{suffix}")
+            else:
+                print("     为什么：这条没有置信度记录（早于 A7 归档，或不属于通知候选）。")
         print()
     return 0
 
