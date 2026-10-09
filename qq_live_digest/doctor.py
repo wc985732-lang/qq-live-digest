@@ -459,7 +459,7 @@ def run_checks(ctx: DoctorContext) -> list[Check]:
         check_onebot(ctx),
         check_llm(ctx),
         check_llm_usage(ctx),
-    check_panel(ctx),
+        check_panel(ctx),
         check_confidence(ctx),
         check_feedback(ctx),
         check_storage(ctx),

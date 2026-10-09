@@ -524,5 +524,19 @@ class LoopbackAuthTest(unittest.TestCase):
         self.assertEqual(self.store.get_task(self.task_id)["status"], "done")
 
 
+class TokenStabilityTest(unittest.TestCase):
+    """重启必须沿用已生成的 token：一旦轮换，所有已保存的带 token 链接 / PWA 会静默 401。"""
+
+    def test_generated_token_survives_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "restart.sqlite3")
+            settings = Settings(web_host="127.0.0.1", web_port=0, web_token="")
+            first = TaskWebServer(settings, store)
+            self.assertTrue(first.token)
+            second = TaskWebServer(settings, store)
+            self.assertEqual(second.token, first.token)
+            self.assertEqual(store.meta_get("web_token"), first.token)
+
+
 if __name__ == "__main__":
     unittest.main()
