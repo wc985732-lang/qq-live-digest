@@ -28,7 +28,7 @@
 - 可将低优先级群标记为安静群，只接收明确通知，不立即推送讨论。
 - 群里发的 PDF、Word、Excel、PPT、zip 和截图可自动解析并纳入摘要。
 - 班级群和闲聊群转发的同一条通知支持跨群去重。
-- 支持 WxPusher、Server酱、PushPlus、Webhook 等推送通道。
+- 支持 WxPusher、Server酱、PushPlus、Webhook、ntfy、Telegram、Discord、企业微信、邮件等推送通道。
 - 提供移动端待办台、截止提醒、候选确认、完成/忽略/稍后提醒和周复盘。
 - 支持 NapCat/OneBot v11 实时接收和重启后的 24 小时历史补采。
 
@@ -48,7 +48,7 @@
 | `qq_live_digest/ics.py` | 日历导出：把有明确时间的待办导成 iCalendar（只读，供手机 / 桌面日历订阅） |
 | `qq_live_digest/conflicts.py` | 时间冲突检测：截止时间相近的待办按组提醒（只读，不擅自改任务） |
 | `qq_live_digest/summarizer.py` | 分级筛选、待办/截止提取、推送文本生成 |
-| `qq_live_digest/push.py` | WxPusher / Server酱 / PushPlus / Webhook / QQ 私聊，失败自动回退 |
+| `qq_live_digest/push.py` | WxPusher / Server酱 / PushPlus / Webhook / ntfy / Telegram / Discord / 企业微信 / 邮件 / QQ 私聊，失败自动回退 |
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
@@ -81,6 +81,7 @@ Copy-Item .env.example .env
   留空则**不处理任何群**（不会默认接收全部群）。
 - `QQ_DIGEST_ONEBOT_TOKEN`：与 NapCat OneBot HTTP 上报配置一致。
 - `WXPUSHER_APP_TOKEN`、`WXPUSHER_UIDS`：推荐使用的微信推送通道。
+- `NTFY_TOPICS`、`TELEGRAM_BOT_TOKEN`+`TELEGRAM_CHAT_IDS`、`QQ_DIGEST_DISCORD_WEBHOOKS`、`QQ_DIGEST_WECOM_KEYS`、`QQ_DIGEST_SMTP_*`+`QQ_DIGEST_MAIL_TO`：A14 新增的多端通道（ntfy / Telegram / Discord / 企业微信 / 邮件），和已有通道一样参与失败回退。
 - `DASHSCOPE_API_KEY`：可选；不填会使用本地规则摘要。
 
 启动前先自检：

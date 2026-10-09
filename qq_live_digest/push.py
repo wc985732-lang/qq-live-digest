@@ -7,10 +7,12 @@ import asyncio
 import hashlib
 import json
 import logging
+import smtplib
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from email.message import EmailMessage
 from typing import Any, Iterable
 
 from .config import Settings
@@ -97,6 +99,25 @@ def post_form(url: str, payload: dict[str, Any], timeout: int = 15) -> dict[str,
         return json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError:
         return {"raw": raw[:300]}
+
+
+def post_text(url: str, body: str, headers: dict[str, str] | None = None, timeout: int = 15) -> str:
+    """POST 纯文本正文（ntfy 这类用请求头传标题、正文直接放在 body）。"""
+    data = body.encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "text/plain; charset=utf-8", "User-Agent": USER_AGENT, **(headers or {})},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")[:300]
+        raise PushError(f"HTTP {error.code}: {detail}") from error
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise PushError(f"请求失败: {error}") from error
 
 
 def chunk_text(text: str, limit: int) -> list[str]:
@@ -257,6 +278,133 @@ class WebhookPusher(Pusher):
         )
 
 
+class NtfyPusher(Pusher):
+    """ntfy：标题走请求头、正文放 body；中文标题放进正文，避免 header 非 ASCII 报错。"""
+
+    name = "ntfy"
+
+    def __init__(self, base_url: str, topic: str, token: str = "", timeout: int = 15) -> None:
+        host = urllib.parse.urlparse(base_url).netloc or "ntfy"
+        super().__init__(f"{host}/{topic}")
+        self.base_url = (base_url or "https://ntfy.sh").rstrip("/")
+        self.topic = topic
+        self.token = token
+        self.timeout = timeout
+
+    def send(self, title: str, body: str, *, summary: str = "", html: str = "") -> None:
+        headers = {"X-Tags": "bell"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        if title and title.isascii():
+            headers["Title"] = title[:200]
+        url = f"{self.base_url}/{urllib.parse.quote(self.topic)}"
+        for chunk in chunk_text(f"{title}\n{body}", HTTP_TEXT_LIMIT):
+            post_text(url, chunk, headers, self.timeout)
+
+
+class TelegramPusher(Pusher):
+    name = "telegram"
+
+    def __init__(self, bot_token: str, chat_id: str, timeout: int = 15) -> None:
+        super().__init__("chat=" + str(chat_id))
+        self.bot_token = bot_token
+        self.chat_id = str(chat_id)
+        self.timeout = timeout
+
+    def send(self, title: str, body: str, *, summary: str = "", html: str = "") -> None:
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        for chunk in chunk_text(f"{title}\n{body}", 3500):
+            result = post_json(
+                url,
+                {"chat_id": self.chat_id, "text": chunk, "disable_web_page_preview": True},
+                self.timeout,
+            )
+            if not result.get("ok"):
+                raise PushError(f"Telegram 返回异常: {str(result)[:200]}")
+
+
+class DiscordPusher(Pusher):
+    name = "discord"
+
+    def __init__(self, url: str, timeout: int = 15) -> None:
+        fingerprint = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]
+        super().__init__(f"{urllib.parse.urlparse(url).netloc or 'discord'}#{fingerprint}")
+        self.url = url
+        self.timeout = timeout
+
+    def send(self, title: str, body: str, *, summary: str = "", html: str = "") -> None:
+        for chunk in chunk_text(f"**{title}**\n{body}", 1900):
+            post_json(self.url, {"content": chunk, "username": "QQ 群通知"}, self.timeout)
+
+
+class WeComPusher(Pusher):
+    """企业微信群机器人 webhook。"""
+
+    name = "wecom"
+
+    def __init__(self, key: str, timeout: int = 15) -> None:
+        super().__init__("key=" + key[:6] + "***")
+        self.key = key
+        self.timeout = timeout
+
+    def send(self, title: str, body: str, *, summary: str = "", html: str = "") -> None:
+        url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=" + urllib.parse.quote(self.key)
+        for chunk in chunk_text(f"{title}\n{body}", HTTP_TEXT_LIMIT):
+            result = post_json(url, {"msgtype": "text", "text": {"content": chunk}}, self.timeout)
+            if int(result.get("errcode") or 0) != 0:
+                raise PushError(f"企业微信返回异常: {str(result)[:200]}")
+
+
+class EmailPusher(Pusher):
+    """SMTP 邮件：465 走 SSL，其它端口按 starttls 决定是否升级。"""
+
+    name = "email"
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        user: str = "",
+        password: str = "",
+        sender: str = "",
+        recipients: Iterable[str] = (),
+        starttls: bool = True,
+        timeout: int = 15,
+    ) -> None:
+        self.host = host
+        self.port = int(port or 465)
+        self.user = user
+        self.password = password
+        self.sender = sender or user
+        self.recipients = [str(item) for item in recipients]
+        self.starttls = starttls
+        self.timeout = timeout
+        super().__init__(f"{host}:{self.port} -> {len(self.recipients)} 人")
+
+    def send(self, title: str, body: str, *, summary: str = "", html: str = "") -> None:
+        message = EmailMessage()
+        message["Subject"] = title or "QQ 群通知"
+        message["From"] = self.sender
+        message["To"] = ", ".join(self.recipients)
+        message.set_content(body)
+        if html:
+            message.add_alternative(html, subtype="html")
+        try:
+            if self.port == 465:
+                server: Any = smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout)
+            else:
+                server = smtplib.SMTP(self.host, self.port, timeout=self.timeout)
+                if self.starttls:
+                    server.starttls()
+            with server:
+                if self.user:
+                    server.login(self.user, self.password)
+                server.send_message(message)
+        except (smtplib.SMTPException, OSError, TimeoutError) as error:
+            raise PushError(f"邮件发送失败: {error}") from error
+
+
 def build_pushers(settings: Settings, *, api: Any = None, loop: asyncio.AbstractEventLoop | None = None) -> list[Pusher]:
     pushers: list[Pusher] = []
     if settings.push_c2c_openids and api is not None and loop is not None:
@@ -280,6 +428,30 @@ def build_pushers(settings: Settings, *, api: Any = None, loop: asyncio.Abstract
         pushers.append(PushPlusPusher(token, settings.http_timeout))
     for url in settings.webhook_urls:
         pushers.append(WebhookPusher(url, settings.http_timeout))
+    for topic in settings.ntfy_topics:
+        pushers.append(
+            NtfyPusher(settings.ntfy_url, topic, settings.ntfy_token, settings.http_timeout)
+        )
+    if settings.telegram_bot_token:
+        for chat_id in settings.telegram_chat_ids:
+            pushers.append(TelegramPusher(settings.telegram_bot_token, chat_id, settings.http_timeout))
+    for url in settings.discord_webhook_urls:
+        pushers.append(DiscordPusher(url, settings.http_timeout))
+    for key in settings.wecom_webhook_keys:
+        pushers.append(WeComPusher(key, settings.http_timeout))
+    if settings.email_smtp_host and settings.email_to:
+        pushers.append(
+            EmailPusher(
+                settings.email_smtp_host,
+                settings.email_smtp_port,
+                user=settings.email_smtp_user,
+                password=settings.email_smtp_password,
+                sender=settings.email_from,
+                recipients=settings.email_to,
+                starttls=settings.email_starttls,
+                timeout=settings.http_timeout,
+            )
+        )
 
     if not any(pusher.tier == 0 for pusher in pushers):
         # 没有 QQ 通道时，HTTP 通道就是主通道

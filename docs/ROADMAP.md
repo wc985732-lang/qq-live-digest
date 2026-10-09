@@ -43,7 +43,7 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | 跨群同通知去重、最近推送窗口二次去重 | ✅ 已上线 | `store.py` |
 | 事件级跨群聚合（对象+动作+时间+截止+来源；默认关，可拆分误合并） | ✅ 已上线 | `qq_live_digest/events.py` |
 | SQLite 结构化存储（messages/processed/digests/deliveries/tasks/task_events/decisions/llm_calls） | ✅ 已上线 | `store.py` |
-| 多通道推送 + 失败回退（WxPusher/Server酱/PushPlus/Webhook/QQ私聊） | ✅ 已上线 | `push.py` |
+| 多通道推送 + 失败回退（WxPusher/Server酱/PushPlus/Webhook/ntfy/Telegram/Discord/企业微信/邮件/QQ私聊） | ✅ 已上线 | `push.py` |
 | 手机待办台（今天/本周/以后/已完成，完成/忽略/纠错/稍后提醒） | ✅ 已上线 | `webapp.py` (8766) |
 | 只读 REST API（/api /notifications /tasks /deadlines /health，token 鉴权） | ✅ 已上线 | `qq_live_digest/restapi.py` + `webapp.py` |
 | 只读 MCP 接口（4 只读 Tool：recent_notifications / todos / deadlines / search_messages） | ✅ 已上线 | `qq_live_digest/mcp.py` + `main.py mcp` |
@@ -120,7 +120,7 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | A15 | 只读 REST API（/notifications /tasks /deadlines /health，token 鉴权） | ✅ | 4 | 5 | 4 | 3 | 4 | 3 | **3.95** | M | A28 |
 | A1 | MCP 只读接口（4 Tool：recent_notifications / todos / deadlines / search_messages） | ✅ | 3 | 5 | 4 | 4 | 5 | 3 | **3.90** | M | A15 |
 | A13 | ICS/日历导出（明确时间的通知生成 ICS，先下载/订阅） | ✅ | 4 | 4 | 4 | 3 | 2 | 4 | **3.65** | M | — |
-| A14 | 多端推送扩展（Telegram/Discord/邮件/企业微信/ntfy + 失败回退） | 🟡 | 4 | 3 | 4 | 3 | 3 | 3 | **3.45** | M | — |
+| A14 | 多端推送扩展（Telegram/Discord/邮件/企业微信/ntfy + 失败回退） | ✅ | 4 | 3 | 4 | 3 | 3 | 3 | **3.45** | M | — |
 | A22 | Prompt/模型 A/B（固定评测集，对比准确率/成本/延迟） | ⬜ | 3 | 4 | 3 | 3 | 3 | 3 | **3.20** | M | A21 |
 | A16 | PWA 离线能力（manifest/service worker/缓存/离线只读/安装引导） | 🟡 | 3 | 3 | 4 | 3 | 2 | 4 | **3.15** | M | — |
 | A12 | 时间冲突检测（统一 start/end/deadline，提醒冲突，不擅自改任务） | ✅ | 3 | 3 | 3 | 3 | 2 | 3 | **2.90** | M | A13 |

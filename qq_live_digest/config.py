@@ -132,6 +132,23 @@ class Settings:
     pushplus_tokens: tuple[str, ...] = ()
     webhook_urls: tuple[str, ...] = ()
 
+    # 多端推送扩展（A14）：ntfy / Telegram / Discord / 企业微信 / 邮件。
+    # 与已有通道一样参与「主通道失败 → 回退其它通道」的派发，不需要额外开关。
+    ntfy_url: str = "https://ntfy.sh"
+    ntfy_topics: tuple[str, ...] = ()
+    ntfy_token: str = ""
+    telegram_bot_token: str = ""
+    telegram_chat_ids: tuple[str, ...] = ()
+    discord_webhook_urls: tuple[str, ...] = ()
+    wecom_webhook_keys: tuple[str, ...] = ()
+    email_smtp_host: str = ""
+    email_smtp_port: int = 465
+    email_smtp_user: str = ""
+    email_smtp_password: str = ""
+    email_from: str = ""
+    email_to: tuple[str, ...] = ()
+    email_starttls: bool = True
+
     dashscope_api_key: str = ""
     dashscope_model: str = "qwen-plus"
     dashscope_endpoint: str = DEFAULT_DASHSCOPE_ENDPOINT
@@ -265,6 +282,20 @@ class Settings:
             serverchan_keys=split_list(get("SERVERCHAN_KEYS")),
             pushplus_tokens=split_list(get("PUSHPLUS_TOKENS")),
             webhook_urls=split_list(get("QQ_DIGEST_WEBHOOKS")),
+            ntfy_url=get("QQ_DIGEST_NTFY_URL", "https://ntfy.sh").strip() or "https://ntfy.sh",
+            ntfy_topics=split_list(get("NTFY_TOPICS")),
+            ntfy_token=get("NTFY_TOKEN").strip(),
+            telegram_bot_token=get("TELEGRAM_BOT_TOKEN").strip(),
+            telegram_chat_ids=split_list(get("TELEGRAM_CHAT_IDS")),
+            discord_webhook_urls=split_list(get("QQ_DIGEST_DISCORD_WEBHOOKS")),
+            wecom_webhook_keys=split_list(get("QQ_DIGEST_WECOM_KEYS")),
+            email_smtp_host=get("QQ_DIGEST_SMTP_HOST").strip(),
+            email_smtp_port=max(1, parse_int(get("QQ_DIGEST_SMTP_PORT", "465"), 465)),
+            email_smtp_user=get("QQ_DIGEST_SMTP_USER").strip(),
+            email_smtp_password=get("QQ_DIGEST_SMTP_PASSWORD").strip(),
+            email_from=get("QQ_DIGEST_MAIL_FROM").strip(),
+            email_to=split_list(get("QQ_DIGEST_MAIL_TO")),
+            email_starttls=parse_bool(get("QQ_DIGEST_SMTP_STARTTLS", "1"), True),
             dashscope_api_key=get("DASHSCOPE_API_KEY").strip(),
             dashscope_model=get("QQ_DIGEST_LLM_MODEL", "qwen-plus").strip() or "qwen-plus",
             dashscope_endpoint=get("QQ_DIGEST_LLM_ENDPOINT", DEFAULT_DASHSCOPE_ENDPOINT).strip()
@@ -431,6 +462,16 @@ class Settings:
             channels.append("pushplus")
         if self.webhook_urls:
             channels.append("webhook")
+        if self.ntfy_topics:
+            channels.append("ntfy")
+        if self.telegram_bot_token and self.telegram_chat_ids:
+            channels.append("telegram")
+        if self.discord_webhook_urls:
+            channels.append("discord")
+        if self.wecom_webhook_keys:
+            channels.append("wecom")
+        if self.email_smtp_host and self.email_to:
+            channels.append("email")
         return channels
 
     def problems(self) -> list[str]:
@@ -439,7 +480,10 @@ class Settings:
         if self.official_bot_enabled and (not self.appid or not self.secret):
             issues.append("缺少 QQ_BOT_APPID / QQ_BOT_SECRET，官方机器人无法登录。")
         if not self.push_channels():
-            issues.append("未配置任何推送通道（QQ 私聊 openid / WxPusher / Server酱 / PushPlus / Webhook）。")
+            issues.append(
+                "未配置任何推送通道（QQ 私聊 openid / WxPusher / Server酱 / PushPlus / Webhook / "
+                "ntfy / Telegram / Discord / 企业微信 / 邮件）。"
+            )
         if not self.group_whitelist:
             issues.append("QQ_DIGEST_GROUPS 未配置：不会处理任何群；请在 .env 填写要监控的群号。")
         if self.onebot_enabled and not self.onebot_token:
