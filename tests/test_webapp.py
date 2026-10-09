@@ -17,7 +17,13 @@ if str(PROJECT_ROOT) not in sys.path:
 from qq_live_digest.config import Settings  # noqa: E402
 from qq_live_digest.store import Store  # noqa: E402
 from qq_live_digest.timeutil import iso  # noqa: E402
-from qq_live_digest.webapp import TaskWebServer, group_tasks, overview  # noqa: E402
+from qq_live_digest.webapp import (  # noqa: E402
+    MANIFEST_JSON,
+    PAGE_HTML,
+    TaskWebServer,
+    group_tasks,
+    overview,
+)
 
 NOW = dt.datetime(2026, 9, 30, 9, 0, 0)
 
@@ -167,6 +173,55 @@ class TaskApiTest(unittest.TestCase):
             body = response.read().decode("utf-8")
         self.assertIn("群消息待办", body)
         self.assertIn("/api/tasks", body)
+
+    def test_card_toggles_have_mobile_tap_targets(self) -> None:
+        self.assertIn("details:not(.section)>summary{", PAGE_HTML)
+        self.assertIn("min-height:44px", PAGE_HTML)
+        self.assertIn("max-height:45vh", PAGE_HTML)
+        self.assertIn("addEventListener('toggle', function () {", PAGE_HTML)
+        # 勾选圆点本体只有 29px，靠透明子元素把命中区撑到 45px
+        self.assertIn(".check-hit{position:absolute", PAGE_HTML)
+        self.assertIn("width:45px;height:45px", PAGE_HTML)
+
+    def test_deadline_label_distinguishes_past_and_future(self) -> None:
+        from qq_live_digest.webapp import _deadline_label
+
+        now = dt.datetime(2026, 9, 30, 9, 0, 0)
+        past_text, past_overdue = _deadline_label(dt.datetime(2026, 9, 28, 18, 0), now)
+        self.assertTrue(past_overdue)
+        self.assertTrue(past_text.endswith("已过"), past_text)
+        future_text, future_overdue = _deadline_label(dt.datetime(2026, 10, 2, 18, 0), now)
+        self.assertFalse(future_overdue)
+        self.assertTrue(future_text.endswith("截止"), future_text)
+        # 「已逾期」胶囊已删：它和 deadline-chip 的「已过」是同一件事，重复且会挤到第二行
+        self.assertNotIn("overdue-chip", PAGE_HTML)
+
+    def test_card_toggles_collapse_into_one_row(self) -> None:
+        # 三个折叠开关并成一行：「详细 / 原文 / 纠错」短标签给眼睛看，完整名称给读屏
+        self.assertIn("el('div', 'toggle-row')", PAGE_HTML)
+        self.assertIn("toggleSummary('详细要求', '详细')", PAGE_HTML)
+        self.assertIn("toggleSummary('查看完整原文', '原文')", PAGE_HTML)
+        self.assertIn(".toggle-row>details{flex:1 1 0", PAGE_HTML)
+        self.assertIn("toggles.appendChild(correctionPanel(task))", PAGE_HTML)
+        self.assertIn("node.setAttribute('aria-label', label)", PAGE_HTML)
+
+    def test_themes_are_tokenized_and_switchable(self) -> None:
+        # 深色是 :root 默认，浅色只覆盖同名 token；主题在首帧前由 head 内联脚本落到 data-theme
+        self.assertIn('[data-theme="light"]{', PAGE_HTML)
+        self.assertIn("--card:#171C25", PAGE_HTML)
+        self.assertIn("--card:#FFFFFF", PAGE_HTML)
+        self.assertIn("localStorage.getItem(KEY)", PAGE_HTML)
+        self.assertIn("(prefers-color-scheme: light)", PAGE_HTML)
+        self.assertIn("document.documentElement.dataset.theme", PAGE_HTML)
+        self.assertIn("['auto', '跟随系统'], ['light', '浅色'], ['dark', '深色']", PAGE_HTML)
+        # 旧 token 不能有残留引用（未定义的 var() 会被浏览器当无效值静默丢掉）
+        self.assertNotIn("var(--surface)", PAGE_HTML)
+        self.assertNotIn("var(--grad", PAGE_HTML)
+
+    def test_manifest_colors_match_page_default(self) -> None:
+        self.assertIn('"background_color": "#0E1117"', MANIFEST_JSON)
+        self.assertIn('"theme_color": "#0E1117"', MANIFEST_JSON)
+        self.assertIn('<meta name="theme-color" content="#0E1117">', PAGE_HTML)
 
     def test_pwa_assets_are_public(self) -> None:
         for path, content_type in (
