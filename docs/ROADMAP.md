@@ -16,7 +16,7 @@
 
 ```
 QQ → NTQQ/NapCat → OneBot v11 → 本地规则/去重/打分 → 可选 LLM(千问)
-   → 结构化存储(SQLite) → 推送(WxPusher 等) / PWA 待办台 → (未来) MCP/Agent 只读接口
+   → 结构化存储(SQLite) → 推送(WxPusher 等) / PWA 待办台 → MCP/Agent 接口（查询 + 确认后写待办）
 ```
 
 Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉线只影响接收，不影响数据本身。
@@ -46,7 +46,7 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | 多通道推送 + 失败回退（WxPusher/Server酱/PushPlus/Webhook/ntfy/Telegram/Discord/企业微信/邮件/QQ私聊） | ✅ 已上线 | `push.py` |
 | 手机待办台 + PWA（今天/本周/以后/已完成；可安装、离线只读、安装引导） | ✅ 已上线 | `webapp.py` (8766) |
 | 只读 REST API（/api /notifications /tasks /deadlines /health，token 鉴权） | ✅ 已上线 | `qq_live_digest/restapi.py` + `webapp.py` |
-| 只读 MCP 接口（4 只读 Tool：recent_notifications / todos / deadlines / search_messages） | ✅ 已上线 | `qq_live_digest/mcp.py` + `main.py mcp` |
+| MCP 接口（只读 5 Tool + 可写待办 2 Tool：仅 tasks、必须 confirm、逐次审计） | ✅ 已上线 | `qq_live_digest/mcp.py` + `main.py mcp` |
 | ICS / 日历导出（有明确时间的待办导成 iCalendar，网页 + CLI） | ✅ 已上线 | `qq_live_digest/ics.py` + `main.py ics` |
 | 时间冲突检测（截止时间相近的待办按组提醒，不改任务） | ✅ 已上线 | `qq_live_digest/conflicts.py` + `main.py conflicts` |
 | 截止提醒（07:30 / 21:00）+ 周复盘 | ✅ 已上线 | `service.py` |
@@ -135,7 +135,7 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | A10 | 可配置规则 DSL（YAML/JSON 描述 group/keyword/sender/time/priority/action） | 🟡 | 4 | 3 | 2 | 2 | 2 | 2 | **2.80** | L | A9 |
 | A35 | 本地模型 Provider（Provider 抽象完成后接 1 个轻量本地模型，先分类或摘要） | ⬜ | 2 | 3 | 2 | 4 | 3 | 2 | **2.60** | L | A4, A21 |
 | A29 | Tailscale 诊断集成（先检测在线/tailnet/serve，不默认改网络策略） | ⬜ | 3 | 2 | 3 | 3 | 1 | 3 | **2.60** | M | — |
-| A2 | MCP 可写待办（仅 tasks、审计日志、必须 confirm、不开放 QQ 发送） | ⬜ | 3 | 4 | 3 | 2 | 3 | 2 | **2.95** | M | A1, A8 |
+| A2 | MCP 可写待办（仅 tasks、审计日志、必须 confirm、不开放 QQ 发送） | ✅ | 3 | 4 | 3 | 2 | 3 | 2 | **2.95** | M | A1, A8 |
 | A17 | 多用户/家庭/小团队（user_id/tenant_id + 数据隔离） | ⬜ | 2 | 3 | 1 | 1 | 2 | 1 | **1.80** | XL | 单用户成熟 |
 
 ---
@@ -152,7 +152,8 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 
 **Phase 2（2–4 个月）目标：从消息处理升级为个人信息中枢。**
 验收：跨群同一事件聚合为一条；明确时间可导出 ICS 并识别时间冲突；
-提供只读 REST + MCP（4 Tool），Cursor/Claude 能安全查询通知、待办、截止时间。
+提供只读 REST + MCP（只读 5 Tool），并在 `confirm` 约束下开放待办写入（仅 `tasks`、逐次审计）；
+Cursor/Claude 能安全查询通知、待办、截止时间。
 
 **Phase 3（4–6 个月+）目标：生态扩张。**
 验收：Linux/Docker 可跑通；英文文档 + 架构图齐备；本地模型可作可选 Provider 并通过 Benchmark 门槛；

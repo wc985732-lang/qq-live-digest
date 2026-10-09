@@ -38,8 +38,10 @@ Agent 属于未来的**上层可选能力**，不会反过来接管底层消息�
 
 ### Q：这算 MCP 吗？
 
-**目前不是。** 未来可以增加一个**只读 MCP Server**，让 Cursor / Claude 等 AI 安全地查询通知、待办、截止时间和历史消息，
-但不会让 AI 直接控制 QQ。见 `docs/ROADMAP.md` 的 A1 / A3。
+**是（A1 / A2 已上线）。** `main.py mcp` 是一个 **stdio MCP Server**，让 Cursor / Claude 等 AI 安全地
+查询通知、待办、截止时间和历史消息；并可在**显式 `confirm=true`** 的前提下标记 / 新建**待办**
+（只碰 `tasks` 表，逐次写审计）。**它不会让 AI 直接控制 QQ**——没有发送 / 删群 / 改设置的入口。
+详见 `docs/API.md` 与 `docs/ROADMAP.md` 的 A1 / A2 / A3。
 
 ---
 

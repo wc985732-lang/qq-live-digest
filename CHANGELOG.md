@@ -5,7 +5,9 @@
 
 ## [Unreleased]
 
-Phase 2「信息中枢」的头三块：事件级跨群聚合（`A11`）、只读 REST API（`A15`）与只读 MCP 接口（`A1`），外加一处时间窗脆弱测试的修复。
+Phase 2「信息中枢」全部交付：事件级跨群聚合（`A11`）、只读 REST API（`A15`）、MCP 接口（`A1` 只读 +
+`A2` 确认后可写待办）、ICS / 日历导出（`A13`）、时间冲突检测（`A12`）、多端推送扩展（`A14`）、
+PWA 离线（`A16`）与 Prompt / 模型 A-B 对比（`A22`），外加一处时间窗脆弱测试的修复。
 
 ### 新增
 - 新增**只读 REST API**（Roadmap `A15`）：待办台服务同端口对外提供自描述的只读接口
@@ -17,9 +19,15 @@ Phase 2「信息中枢」的头三块：事件级跨群聚合（`A11`）、只�
 - 新增**只读 MCP 接口**（Roadmap `A1`）：把上面的只读口径包成 MCP Tool，`main.py mcp`（别名
   `mcp-serve`）以标准 **stdio** 传输对外服务（一行一条 JSON-RPC 2.0，**stdout 只放协议消息**），
   供 Cursor / Claude 等 MCP 客户端安全查询。**只暴露 4 个只读 Tool**——`recent_notifications` /
-  `todos` / `deadlines` / `search_messages`（关键词搜历史消息），没有任何写入、删除或发送能力；
-  `main.py mcp --list-tools` 可离线打印 Tool 定义。新增 `qq_live_digest/mcp.py`（协议层纯函数，
-  可脱离进程单测）；`search_messages` 的本地库查询落在 `store.search_messages`。
+  `todos` / `deadlines` / `search_messages`（关键词搜历史消息）；`main.py mcp --list-tools` 可离线打印
+  Tool 定义。新增 `qq_live_digest/mcp.py`（协议层纯函数，可脱离进程单测）；`search_messages` 的本地库
+  查询落在 `store.search_messages`（`A2` 在这个只读底座上加了受确认约束的待办写入，见下条）。
+- 新增**可写 MCP 待办**（Roadmap `A2`）：在 A1 的只读 MCP 上再加 `set_task_done`（完成 / 重开）与
+  `add_task`（新建待办）两个写 Tool，以及只读的 `recent_audit`（看审计）。写操作**只碰 `tasks` 表**，
+  且**必须显式 `confirm=true`**，否则拒绝；每次调用（含被拒 / 找不到 / 参数错）都写 `audit_log`
+  （新增 `store.record_audit` / `recent_audit` 与 `audit_log` 表）。**没有任何 QQ 发送 / 删群 / 改设置
+  的入口**；`add_task` 用 `summary|deadline` 的 SHA-1 生成稳定 `task_key`，并把 `source` 标成 `mcp`。
+  MCP 工具目录现为 **5 只读 + 2 可写**，只读 Tool 带 `readOnlyHint` 标注。
 - 新增**ICS / 日历导出**（Roadmap `A13`）：把「有明确时间的待办」导成 iCalendar（RFC 5545），
   供手机 / 桌面日历下载或订阅。新增 `qq_live_digest/ics.py`（纯字符串处理，无 I/O）；`main.py ics`
   （别名 `calendar`）写文件或 `--print` 到标准输出，待办台新增 `GET /api/calendar.ics`（token 鉴权，

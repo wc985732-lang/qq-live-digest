@@ -44,7 +44,7 @@
 | `qq_live_digest/observe.py` | 可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏、只读聚合） |
 | `qq_live_digest/events.py` | 事件级跨群聚合：按对象+动作+时间+截止+来源把同一事件合成一条（默认关，可拆分） |
 | `qq_live_digest/restapi.py` | 只读 REST 数据口径：通知 / 待办 / 截止时间 / 面板（网页与 CLI 共用，只发 SELECT） |
-| `qq_live_digest/mcp.py` | 只读 MCP 接口：4 个只读 Tool（通知 / 待办 / 截止 / 搜索历史），stdio 给 Cursor / Claude 用 |
+| `qq_live_digest/mcp.py` | MCP 接口：5 个只读 Tool + 2 个可写待办 Tool（仅 tasks、必须 confirm、记审计），stdio 给 Cursor / Claude 用 |
 | `qq_live_digest/ics.py` | 日历导出：把有明确时间的待办导成 iCalendar（只读，供手机 / 桌面日历订阅） |
 | `qq_live_digest/conflicts.py` | 时间冲突检测：截止时间相近的待办按组提醒（只读，不擅自改任务） |
 | `qq_live_digest/abtest.py` | Prompt / 模型 A/B：固定评测集上对比两套配置的准确率 / 成本 / 延迟（只读） |
@@ -146,7 +146,7 @@ cd <项目目录>
 # 只读 REST API：接口目录 / 鉴权状态 / 访问地址（A15，字段见 docs/API.md）
 .\.venv\Scripts\python.exe main.py api
 
-# 只读 MCP 接口：4 个只读 Tool，stdio 给 Cursor / Claude 查询（A1，--list-tools 可离线打印 Tool 定义）
+# MCP 接口：5 只读 + 2 可写待办 Tool，stdio 给 Cursor / Claude 查询（A1/A2，--list-tools 可离线打印 Tool 定义）
 .\.venv\Scripts\python.exe main.py mcp --list-tools
 
 # 日历导出：把有明确时间的待办导成 ICS，导入手机 / 桌面日历（A13）

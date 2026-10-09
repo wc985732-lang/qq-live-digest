@@ -152,6 +152,17 @@ CREATE TABLE IF NOT EXISTS llm_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status, created_at);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT '',
+    tool       TEXT NOT NULL DEFAULT '',
+    target     TEXT NOT NULL DEFAULT '',
+    ok         INTEGER NOT NULL DEFAULT 1,
+    detail     TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 """
 
 
@@ -1320,6 +1331,55 @@ class Store:
     def set_task_status(self, task_id: int, done: bool) -> bool:
         """兼容旧调用：true=完成，false=重新打开。"""
         return self.apply_task_action(task_id, "done" if done else "reopen")
+
+    def record_audit(
+        self,
+        *,
+        tool: str,
+        target: str = "",
+        ok: bool = True,
+        detail: str = "",
+        source: str = "mcp",
+        now: Any = None,
+    ) -> int:
+        """记录一次外部写操作（A2 审计日志）：只追加，不改既有数据。"""
+        stamp = iso(now or now_local())
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO audit_log (created_at, source, tool, target, ok, detail)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    stamp,
+                    str(source or ""),
+                    str(tool or ""),
+                    str(target or ""),
+                    1 if ok else 0,
+                    str(detail or "")[:500],
+                ),
+            )
+            return int(cursor.lastrowid or 0)
+
+    def recent_audit(self, *, limit: int = 50) -> list[dict[str, Any]]:
+        """最近的审计日志（新→旧）。"""
+        cap = max(1, min(500, int(limit or 50)))
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, created_at, source, tool, target, ok, detail FROM audit_log"
+                " ORDER BY id DESC LIMIT ?",
+                (cap,),
+            ).fetchall()
+        return [
+            {
+                "id": int(row["id"]),
+                "created_at": str(row["created_at"]),
+                "source": str(row["source"]),
+                "tool": str(row["tool"]),
+                "target": str(row["target"]),
+                "ok": bool(row["ok"]),
+                "detail": str(row["detail"]),
+            }
+            for row in rows
+        ]
 
     def task_stats(self) -> dict[str, int]:
         now = iso(now_local())

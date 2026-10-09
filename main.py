@@ -607,14 +607,17 @@ def command_ics(args: argparse.Namespace) -> int:
 
 
 def command_mcp(args: argparse.Namespace) -> int:
-    """只读 MCP 接口（Roadmap A1）：stdio 给 Cursor / Claude 查询通知、待办、截止与历史消息。"""
+    """MCP 接口（Roadmap A1 只读 + A2 可写待办）：stdio 给 Cursor / Claude 查询，并限定了确认后的待办写入。"""
     settings = load_settings(args)
     if args.list_tools:
         print(
             json.dumps(
                 {
                     "server": {"name": mcp.SERVER_NAME, "version": mcp.SERVER_VERSION},
-                    "read_only": True,
+                    "read_only": False,
+                    "read_tools": len(mcp.read_tools()),
+                    "write_tools": len(mcp.write_tools()),
+                    "write_scope": "tasks（必须 confirm=true，逐次记审计；无 QQ 发送/删除）",
                     "tools": mcp.list_tools(),
                 },
                 ensure_ascii=False,
@@ -1076,7 +1079,7 @@ def build_parser() -> argparse.ArgumentParser:
     ics_cmd.add_argument("--json", action="store_true", help="以 JSON 输出摘要")
     ics_cmd.set_defaults(func=command_ics)
 
-    mcp_cmd = sub.add_parser("mcp", aliases=["mcp-serve"], help="只读 MCP 接口（A1）：stdio 给 Cursor / Claude 查询通知、待办、截止、历史消息")
+    mcp_cmd = sub.add_parser("mcp", aliases=["mcp-serve"], help="MCP 接口（A1 只读 + A2 确认后可写待办）：stdio 给 Cursor / Claude 用")
     mcp_cmd.add_argument("--list-tools", action="store_true", dest="list_tools", help="只打印 Tool 定义（调试用），不启动 stdio 会话")
     mcp_cmd.set_defaults(func=command_mcp)
 
