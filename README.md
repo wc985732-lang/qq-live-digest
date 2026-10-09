@@ -46,7 +46,7 @@
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
-| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / simulate |
+| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / simulate |
 
 ## 环境要求
 
@@ -126,6 +126,9 @@ cd <项目目录>
 .\.venv\Scripts\python.exe main.py llm-stats --period week
 .\.venv\Scripts\python.exe main.py llm-stats --period month --recent 20
 
+# 人工反馈回收：候选确认率 / 忽略率 / 纠错类型 / 按群规则建议
+.\.venv\Scripts\python.exe main.py feedback --days 30
+
 # 假群聊回放：500 条消息走完整链路，一条真实推送都不发（不联网、不碰 data/）
 .\.venv\Scripts\python.exe main.py simulate --count 500
 
@@ -193,7 +196,7 @@ tick 几百次也只有一行，`reason` 保留最新一次的原因）。等它
 | --- | --- | --- |
 | 把握较高 | ≥ 0.75 | 证据充分，直接进摘要 / 待办 |
 | 把握中等 | 0.55 – 0.75 | 可用，保留依据方便回查 |
-| 把握较低 | < 0.55 | 只进「待确认」，等你点头才转正式待办（阈值 `QQ_DIGEST_CANDIDATE_MIN_CONFIDENCE`） |
+| 把握较低 | < 阈值（默认 0.55） | 只进「待确认」，等你点头才转正式待办；阈值 `QQ_DIGEST_CANDIDATE_MIN_CONFIDENCE` 是**硬门槛**，低于它的候选不会绕过确认直接进正式待办 |
 
 触发规则是**人话 + 权重**的形式，例如 `+0.18 分值 10，高出阈值 3 两分以上`、
 `-0.24 原话有“记得”等不确定措辞`。权重写在解释里，所以改规则就会改解释，两者不会各说各话。
@@ -209,6 +212,27 @@ tick 几百次也只有一行，`reason` 保留最新一次的原因）。等它
 A7 之前归档的老摘要没有这条记录，`show` 会如实写「这条没有置信度记录」，不假装算过 0 分。
 实现是纯函数（`qq_live_digest/confidence.py`，不碰数据库、不联网），所以推送、待办台和回归测试
 看到的是同一套结果。
+
+### 人工确认与反馈回收 `main.py feedback`
+
+低置信度的行动项不会直接混进正式待办：它们进「待确认」，由你在待办台点头才转正（Roadmap `A8`）。
+这条链路有两半：
+
+- **进待确认**：待办分类用 A7 的置信度打分，低于 `QQ_DIGEST_CANDIDATE_MIN_CONFIDENCE`
+  （默认 0.55）的候选被硬挡住，不会绕过确认直接进正式待办；判定原因里写明分数与阈值，
+  待办台卡片与 `doctor` 的「候选置信度」一行都能看到。
+- **反馈回收**：确认 / 忽略 / 纠错都会记成事件；`main.py feedback` 汇总最近 N 天的确认率、
+  忽略率、纠错类型与按群分布，并把纠错样本转成**可读的规则建议**（例如「某群：误判紧急 3 次，
+  建议收紧该群规则」）。
+
+```powershell
+.\.venv\Scripts\python.exe main.py feedback            # 最近 30 天
+.\.venv\Scripts\python.exe main.py feedback --days 7   # 只看最近一周
+.\.venv\Scripts\python.exe main.py feedback --json     # 交给脚本消费
+```
+
+它**只汇总与建议，不自动改配置**——「怎么改规则」始终由人决定。
+`doctor` 的「反馈闭环」一行给出近 30 天的候选 / 确认 / 忽略 / 纠错概况。
 
 ### 假群聊回放 `main.py simulate`
 

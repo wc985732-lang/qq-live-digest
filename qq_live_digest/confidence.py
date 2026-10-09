@@ -237,9 +237,18 @@ def assess_notice(
 
 # ------------------------------------------------------------------ 待办置信度
 def assess_task(
-    item: Mapping[str, Any], *, quiet: bool = False, evidence: str | None = None
+    item: Mapping[str, Any],
+    *,
+    quiet: bool = False,
+    evidence: str | None = None,
+    high: float = DEFAULT_HIGH,
+    low: float = DEFAULT_LOW,
 ) -> Assessment:
-    """这条算不算「能直接执行的待办」？权重与 A8 完全一致，只是把每步都写进触发规则。"""
+    """这条算不算「能直接执行的待办」？权重与 A8 完全一致，只是把每步都写进触发规则。
+
+    `high` / `low` 是等级阈值；调用方把 `low` 传成 `QQ_DIGEST_CANDIDATE_MIN_CONFIDENCE`，
+    低于它的候选一律先交人工确认（A8）。
+    """
     message = item.get("message")
     text = str(getattr(message, "text", "") or "")
     category = str(item.get("category") or "info")
@@ -307,7 +316,7 @@ def assess_task(
 
     return Assessment(
         confidence=_clamp(confidence),
-        level=level_of(confidence),
+        level=level_of(confidence, high=high, low=low),
         triggers=tuple(triggers),
         signals=tuple(signals),
         details={
@@ -315,5 +324,6 @@ def assess_task(
             "weekly_weak_word": weak,
             "ambiguous_word": ambiguous,
             "quiet": quiet,
+            "confirm_threshold": float(low),
         },
     )

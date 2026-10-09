@@ -152,6 +152,18 @@ CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status, created_at)
 TASK_STATUSES = {"candidate", "open", "done", "dismissed", "expired"}
 
 
+#: 人工纠错类型 → 人话标签（A8 反馈回收展示用）。
+CORRECTION_LABELS = {
+    "not_notice": "误判为通知",
+    "not_task": "误判为待办",
+    "not_urgent": "误判紧急",
+    "duplicate": "重复",
+    "category": "改了分类",
+    "deadline": "改了截止时间",
+    "clear_deadline": "清空截止时间",
+}
+
+
 MESSAGE_COLUMN_MIGRATIONS = {"source_text": "TEXT NOT NULL DEFAULT ''"}
 
 TASK_COLUMN_MIGRATIONS = {
@@ -1404,6 +1416,32 @@ class Store:
         if int((stats.get("by_type") or {}).get("duplicate") or 0) >= 3:
             insights.append("重复标记偏多，建议复查跨群去重时间窗 QQ_DIGEST_DEDUPE_HOURS。")
         return insights
+
+    def feedback_summary(self, *, days: int = 30) -> dict[str, Any]:
+        """人工反馈回收：候选 → 确认 / 忽略 / 纠错，外加按群纠错提示（A8）。
+
+        只汇总与解释，不自动改配置——「怎么改规则」仍由人决定。
+        """
+        days = max(1, int(days))
+        end = now_local()
+        start = end - dt.timedelta(days=days)
+        end = end + dt.timedelta(seconds=1)  # 窗口用 `< end`，补 1 秒，刚发生的反馈别被边界挡掉
+        metrics = self.task_metrics(start=iso(start), end=iso(end))
+        corrections = self.correction_stats(days=days)
+        return {
+            "days": days,
+            "window_start": iso(start),
+            "window_end": iso(end),
+            "candidates": int(metrics.get("candidates") or 0),
+            "confirmed": int(metrics.get("confirmed") or 0),
+            "dismissed": int(metrics.get("dismissed") or 0),
+            "corrected": int(corrections.get("total") or 0),
+            "confirmation_rate": float(metrics.get("confirmation_rate") or 0.0),
+            "dismissal_rate": float(metrics.get("dismissal_rate") or 0.0),
+            "by_type": dict(corrections.get("by_type") or {}),
+            "by_group": dict(corrections.get("by_group") or {}),
+            "insights": self.correction_insights(days=days),
+        }
 
     def clear_tasks(self) -> int:
         with self._connect() as connection:

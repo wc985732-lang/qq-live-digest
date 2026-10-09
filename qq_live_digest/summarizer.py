@@ -249,7 +249,18 @@ def classify_task_item(item: dict[str, Any], settings: Settings) -> dict[str, An
     quiet = is_quiet_group_item(item, settings)
 
     # 分数与「为什么」同源：权重写在触发规则里，改权重就改解释，不会各说各话。
-    assessment = confidence.assess_task(item, quiet=quiet, evidence=evidence)
+    # 等级阈值取配置里的确认阈值，这样「低置信度进待确认」是配置驱动的（A8）。
+    threshold = float(
+        getattr(settings, "candidate_min_confidence", confidence.DEFAULT_LOW)
+        or confidence.DEFAULT_LOW
+    )
+    assessment = confidence.assess_task(
+        item,
+        quiet=quiet,
+        evidence=evidence,
+        high=max(confidence.DEFAULT_HIGH, threshold),
+        low=threshold,
+    )
 
     status = "candidate"
     reason = "只有行动线索，证据还不够直接，先放到待确认。"
@@ -271,12 +282,21 @@ def classify_task_item(item: dict[str, Any], settings: Settings) -> dict[str, An
     elif not has_deadline and direct_action:
         reason = "识别到行动，但没有明确截止时间，先确认是否真的要办。"
 
+    # A8 硬门槛：低于确认阈值的候选绝不直接进正式待办，必须人工点头。
+    if status == "open" and assessment.confidence < threshold:
+        status = "candidate"
+        reason = (
+            f"置信度 {confidence.percent(assessment.confidence)}% 低于确认阈值 "
+            f"{confidence.percent(threshold)}%，先交人工确认。"
+        )
+
     return {
         "status": status,
         "confidence": assessment.confidence,
         "level": assessment.level,
         "triggers": list(assessment.triggers),
         "reason": reason,
+        "threshold": threshold,
         "source": str(item.get("source") or "qq_message"),
     }
 

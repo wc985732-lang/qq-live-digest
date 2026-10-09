@@ -10,6 +10,7 @@
     python main.py stats          # 查看消息/摘要/投递统计
     python main.py llm-stats      # 模型用量与成本：日 / 周 / 月视图
     python main.py benchmark      # 跑脱敏评测集，输出召回 / 误报 / 延迟 / 成本基线
+    python main.py feedback       # 人工反馈回收：候选确认 / 忽略 / 纠错闭环
     python main.py attach-test X  # 解析一个群文件/图片，只打印摘要不推送
 """
 
@@ -44,6 +45,7 @@ from qq_live_digest import decisions  # noqa: E402
 from qq_live_digest import llmstats  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
+from qq_live_digest.store import CORRECTION_LABELS  # noqa: E402
 from qq_live_digest.weburl import build_web_url  # noqa: E402
 from qq_digest import Message  # noqa: E402
 from qq_live_digest.summarizer import Digest, finalize_digest, preview_text  # noqa: E402
@@ -309,6 +311,71 @@ def command_llm_stats(args: argparse.Namespace) -> int:
             print(f"最近 {len(recent)} 次调用（新 → 旧）：")
             for line in llmstats.describe_calls(recent, price_in=price_in, price_out=price_out):
                 print(line)
+    return 0
+
+
+def command_feedback(args: argparse.Namespace) -> int:
+    """人工反馈回收：候选确认 / 忽略 / 纠错的闭环（Roadmap A8）。
+
+    数据来自待办事件表：候选被确认 / 忽略 / 纠错都算反馈。
+    这里只汇总与解释，不自动改配置——「怎么改规则」仍由人决定。
+    """
+    settings = load_settings(args)
+    service = build_service(settings, console=False)
+    store = service.store
+    days = max(1, int(args.days or 30))
+    summary = store.feedback_summary(days=days)
+
+    if args.json:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+
+    start = str(summary.get("window_start") or "").replace("T", " ")[:16]
+    end = str(summary.get("window_end") or "").replace("T", " ")[:16]
+    print(f"反馈回收 · 最近 {days} 天（{start} ~ {end}）")
+    candidates = int(summary.get("candidates") or 0)
+    if not candidates:
+        print(
+            "还没有待确认候选：判断都直接进了正式待办，暂时没有反馈可回收。"
+            "等出现低置信候选后，在待办台「确认 / 忽略 / 纠错」即可把反馈收回来。"
+        )
+        return 0
+    confirmed = int(summary.get("confirmed") or 0)
+    dismissed = int(summary.get("dismissed") or 0)
+    corrected = int(summary.get("corrected") or 0)
+    print(
+        f"候选 {candidates} 条 · 确认 {confirmed}"
+        f"（{float(summary.get('confirmation_rate') or 0.0):g}%） · 忽略 {dismissed}"
+        f"（{float(summary.get('dismissal_rate') or 0.0):g}%） · 纠错 {corrected} 次"
+    )
+    by_type = summary.get("by_type") or {}
+    if by_type:
+        parts = [
+            f"{CORRECTION_LABELS.get(str(kind), str(kind))} ×{int(times or 0)}"
+            for kind, times in sorted(by_type.items(), key=lambda item: -int(item[1] or 0))
+        ]
+        print("纠错类型：" + "、".join(parts))
+    by_group = summary.get("by_group") or {}
+    if by_group:
+        ranked = sorted(
+            by_group.items(), key=lambda item: -int((item[1] or {}).get("total") or 0)
+        )
+        print(f"按群（近 {days} 天纠错）：")
+        for name, entry in ranked[:5]:
+            entry = entry or {}
+            detail = "、".join(
+                f"{CORRECTION_LABELS.get(str(kind), str(kind))} {int(count or 0)}"
+                for kind, count in sorted(entry.items(), key=lambda item: -int(item[1] or 0))
+                if str(kind) != "total"
+            )
+            print(f"  {name}：共 {int(entry.get('total') or 0)} 次（{detail}）")
+    insights = summary.get("insights") or []
+    if insights:
+        print("规则建议（只提建议，不自动改配置）：")
+        for line in insights[:5]:
+            print(f"  {line}")
+    elif corrected:
+        print("暂时没有成规模的纠错模式，继续收集反馈即可。")
     return 0
 
 
@@ -661,6 +728,11 @@ def build_parser() -> argparse.ArgumentParser:
     usage.add_argument("--recent", type=int, default=0, help="额外列出最近 N 条调用明细")
     usage.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     usage.set_defaults(func=command_llm_stats)
+
+    review = sub.add_parser("feedback", aliases=["review"], help="人工反馈回收：候选确认 / 忽略 / 纠错闭环")
+    review.add_argument("--days", type=int, default=30, help="统计最近多少天（默认 30）")
+    review.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
+    review.set_defaults(func=command_feedback)
 
     tasks = sub.add_parser("tasks", help="查看待办清单和手机访问地址")
     tasks.add_argument("--all", action="store_true", help="包含已完成")

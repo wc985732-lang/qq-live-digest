@@ -238,6 +238,7 @@ def check_llm_usage(ctx: DoctorContext) -> Check:
 
 def check_confidence(ctx: DoctorContext) -> Check:
     """候选置信度分布：每条候选都带把握度与判定依据（A7）。"""
+    threshold = float(ctx.settings.candidate_min_confidence or confidence.DEFAULT_LOW)
     try:
         tasks = ctx.store().list_tasks(statuses=("candidate",), limit=200)
     except Exception as error:  # noqa: BLE001 - 统计失败不该拖垮 doctor
@@ -245,11 +246,37 @@ def check_confidence(ctx: DoctorContext) -> Check:
     total = len(tasks)
     if not total:
         return Check("候选置信度", OK, "当前没有待确认候选（每张候选卡片都会带把握度与判定依据）")
-    low = sum(1 for task in tasks if float(task.get("confidence") or 0.0) < confidence.DEFAULT_LOW)
+    low = sum(1 for task in tasks if float(task.get("confidence") or 0.0) < threshold)
     high = sum(1 for task in tasks if float(task.get("confidence") or 0.0) >= confidence.DEFAULT_HIGH)
     detail = f"待确认 {total} 条 · 把握较高 {high} · 建议人工确认 {low}"
     hint = "低置信度不会自动进待办：在待办台确认或忽略（python main.py web）" if low else ""
     return Check("候选置信度", OK, detail, hint)
+
+
+def check_feedback(ctx: DoctorContext) -> Check:
+    """人工反馈回收：候选确认 / 忽略 / 纠错的闭环（A8）。"""
+    try:
+        summary = ctx.store().feedback_summary(days=30)
+    except Exception as error:  # noqa: BLE001 - 统计失败不该拖垮 doctor
+        return Check("反馈闭环", WARN, f"无法统计：{error}", "不影响摘要推送；稍后重试")
+    candidates = int(summary.get("candidates") or 0)
+    if not candidates:
+        return Check("反馈闭环", OK, "最近 30 天没有待确认候选（没有反馈要回收）")
+    confirmed = int(summary.get("confirmed") or 0)
+    dismissed = int(summary.get("dismissed") or 0)
+    corrected = int(summary.get("corrected") or 0)
+    detail = (
+        f"30 天候选 {candidates} · 确认 {confirmed}"
+        f"（{float(summary.get('confirmation_rate') or 0.0):g}%）"
+        f" · 忽略 {dismissed}"
+        f"（{float(summary.get('dismissal_rate') or 0.0):g}%）"
+        f" · 纠错 {corrected}"
+    )
+    insights = summary.get("insights") or []
+    hint = "看明细与规则建议：python main.py feedback"
+    if insights:
+        hint = f"有 {len(insights)} 条纠错提示：python main.py feedback"
+    return Check("反馈闭环", OK, detail, hint)
 
 
 def check_napcat(ctx: DoctorContext) -> Check:
@@ -399,6 +426,7 @@ def run_checks(ctx: DoctorContext) -> list[Check]:
         check_llm(ctx),
         check_llm_usage(ctx),
         check_confidence(ctx),
+        check_feedback(ctx),
         check_storage(ctx),
         check_napcat(ctx),
         check_receiver(ctx),
