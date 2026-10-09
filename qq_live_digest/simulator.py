@@ -183,6 +183,7 @@ def generate(
                 "received_at": iso(stamp),
                 "content": content,
                 "source_text": "",
+                "_expect": expectation(template),
             }
         )
     return records
@@ -384,3 +385,36 @@ def replay(
         report.first_title, report.first_body = channel.sent[0]
     LOGGER.debug("模拟完成：%s", " / ".join(report.summary_lines()))
     return report
+
+
+# 评测集 ground truth（Roadmap A21）：每条剧本「该不该推 / 该不该建待办」。
+# 键必须与 `TEMPLATES` 里的 kind 一一对应（tests/test_benchmark.py 会断言）。
+# `push` 为 None 表示不计入召回与误报（附件、跨群转发副本这类边界样本）；
+# `deadline` 由剧本文本里有没有 `{when}` 自动推出，不在这里写死。
+KIND_EXPECTATIONS: dict[str, dict[str, Any]] = {
+    "chatter": {"push": False, "todo": False},
+    "notice": {"push": True, "todo": True},
+    "homework": {"push": True, "todo": True},
+    "exam": {"push": True, "todo": True},
+    "urgent": {"push": True, "todo": True},
+    "admin": {"push": True, "todo": True},
+    "signup": {"push": True, "todo": True},
+    "link": {"push": True, "todo": True},
+    "image": {"push": None, "todo": False},
+    "file": {"push": None, "todo": False},
+    "repeat": {"push": None, "todo": False},
+    "chat": {"push": False, "todo": False},
+    "ad": {"push": False, "todo": False},
+    "group_notice": {"push": True, "todo": True},
+}
+
+
+def expectation(template: Template) -> dict[str, Any]:
+    """一条剧本的期望结局，随消息一起写进记录（`_expect`），供 benchmark 当 ground truth。"""
+    base = KIND_EXPECTATIONS.get(template.kind, {})
+    return {
+        "kind": template.kind,
+        "push": base.get("push"),
+        "todo": bool(base.get("todo")),
+        "deadline": "{when}" in template.text,
+    }

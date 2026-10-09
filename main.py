@@ -9,6 +9,7 @@
     python main.py doctor         # 自检配置、数据库、机器人凭证
     python main.py stats          # 查看消息/摘要/投递统计
     python main.py llm-stats      # 模型用量与成本：日 / 周 / 月视图
+    python main.py benchmark      # 跑脱敏评测集，输出召回 / 误报 / 延迟 / 成本基线
     python main.py attach-test X  # 解析一个群文件/图片，只打印摘要不推送
 """
 
@@ -353,6 +354,51 @@ def command_simulate(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_benchmark(args: argparse.Namespace) -> int:
+    """跑脱敏评测集，输出召回 / 误报 / 待办 / 截止时间 / 去重 / 延迟 / 成本（Roadmap A21）。
+
+    评测集由 A20 模拟器生成（或从带 `_expect` 标注的 fixture 读），走真实链路回放，
+    全程离线：内存假通道、不调大模型、默认用临时目录，不碰 `data/`。
+    同 seed 必得同一组数字，可以作为回归基线。
+    """
+    from qq_live_digest import benchmark, simulator
+
+    if args.fixture:
+        records = simulator.read_fixture(args.fixture)
+        print(f"载入评测集：{args.fixture}（{len(records)} 条消息）")
+    else:
+        records = simulator.generate(args.count, seed=args.seed, span_hours=args.hours)
+        print(f"生成评测集：{len(records)} 条消息 / {args.hours:g} 小时 / seed={args.seed}")
+    workdir = Path(args.dir) if args.dir else Path(tempfile.mkdtemp(prefix="qq-digest-bench-"))
+    workdir.mkdir(parents=True, exist_ok=True)
+    logging.getLogger("qq_live_digest").setLevel(logging.WARNING)
+    report = benchmark.evaluate(
+        records,
+        data_dir=workdir,
+        quiet_hours=args.quiet_hours,
+        window_minutes=args.window,
+        daily_budget=args.budget,
+        max_items=args.max_items,
+        min_score=args.min_score,
+        seed=args.seed,
+        price_in=args.price_in,
+        price_out=args.price_out,
+    )
+    if args.json:
+        print(json.dumps(report.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print()
+        for line in report.summary_lines():
+            print(line)
+        print()
+        print(f"一次性数据库：{workdir}（跑完可直接删）")
+    if args.fail_under and report.recall < args.fail_under:
+        print()
+        print(f"召回 {report.recall * 100:.1f}% 低于门槛 {args.fail_under * 100:.1f}%")
+        return 1
+    return 0
+
+
 def command_tasks(args: argparse.Namespace) -> int:
     """查看待办清单，并打印手机访问地址。"""
     settings = load_settings(args)
@@ -635,6 +681,27 @@ def build_parser() -> argparse.ArgumentParser:
     sim.add_argument("--min-score", type=int, default=3, dest="min_score", help="入摘要的最低分值")
     sim.add_argument("--quiet-hours", default="", dest="quiet_hours", help="夜间静默时段，如 23:00-07:00")
     sim.set_defaults(func=command_simulate)
+
+    bench = sub.add_parser(
+        "benchmark", aliases=["bench"], help="脱敏评测集：召回 / 误报 / 待办 / 截止 / 去重 / 延迟 / 成本"
+    )
+    bench.add_argument("--count", type=int, default=500, help="评测集条数")
+    bench.add_argument("--seed", type=int, default=20261008, help="随机种子：同参数必得同数据")
+    bench.add_argument("--hours", type=float, default=16.0, help="消息铺开多少小时（08:00 起算）")
+    bench.add_argument("--fixture", default="", help="改从 JSONL fixture 读评测集（需带 _expect 标注）")
+    bench.add_argument("--dir", default="", help="指定数据目录（默认临时目录，跑完即可删）")
+    bench.add_argument("--window", type=int, default=30, help="合并窗口分钟数（默认对齐真实部署）")
+    bench.add_argument("--budget", type=int, default=0, help="每日推送额度（0 = 不限，评测默认不限）")
+    bench.add_argument("--max-items", type=int, default=30, dest="max_items", help="每批最多几条要点")
+    bench.add_argument("--min-score", type=int, default=3, dest="min_score", help="入摘要的最低分值")
+    bench.add_argument("--quiet-hours", default="", dest="quiet_hours", help="夜间静默时段，如 23:00-07:00")
+    bench.add_argument("--price-in", type=float, default=0.0, dest="price_in", help="输入单价（元/百万 token）")
+    bench.add_argument("--price-out", type=float, default=0.0, dest="price_out", help="输出单价（元/百万 token）")
+    bench.add_argument("--json", action="store_true", help="以 JSON 输出全部指标")
+    bench.add_argument(
+        "--fail-under", type=float, default=0.0, dest="fail_under", help="召回门槛：低于它退出码 1"
+    )
+    bench.set_defaults(func=command_benchmark)
 
     catchup = sub.add_parser("catchup", help="从 NapCat 补采最近的历史群消息")
     catchup.set_defaults(func=command_catchup)

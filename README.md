@@ -128,6 +128,9 @@ cd <项目目录>
 
 # 假群聊回放：500 条消息走完整链路，一条真实推送都不发（不联网、不碰 data/）
 .\.venv\Scripts\python.exe main.py simulate --count 500
+
+# 脱敏评测集：召回 / 误报 / 待办 / 截止时间 / 去重 / 延迟 / 成本基线（同样离线）
+.\.venv\Scripts\python.exe main.py benchmark
 ```
 
 ### 模型用量与成本 `main.py llm-stats`
@@ -228,6 +231,22 @@ A7 之前归档的老摘要没有这条记录，`show` 会如实写「这条没�
 - **不碰 `data/`**：默认在一个临时目录里跑，跑完可以直接删。
 - **确定性**：`--seed` 相同必然得到同一份数据，`msg_id` 形如 `sim-20261008-00042`，
   可以拿 `main.py decisions --msg-id` 逐条回查为什么它被推 / 被挡。
+
+### 评测集基线 `main.py benchmark`
+
+想知道"改了规则或模型之后是变好还是变坏"，跑一遍脱敏评测集就行：
+
+```powershell
+.\.venv\Scripts\python.exe main.py benchmark                    # 500 条 / seed=20261008
+.\.venv\Scripts\python.exe main.py benchmark --json             # 全部指标 + 每类消息明细
+.\.venv\Scripts\python.exe main.py benchmark --fail-under 0.9   # 召回低于 90% 退出码 1
+```
+
+评测集直接复用 `simulate` 的假群聊，每条消息自带**意图标注**（该不该推 / 该不该建待办 /
+有没有截止时间），跑完真实链路后输出召回、误报、待办判定、截止时间、跨群去重、延迟、成本
+与置信度分布。当前基线：**召回 100%、误报 0.5%、待办与截止时间 100%、去重 100%、
+延迟中位 0.0 / P95 31.6 分钟**。同样不联网、不碰 `data/`、同 seed 必得同数字，
+`tests/test_benchmark.py` 把它锁进了 CI。详见 [评测集与基线数字](docs/BENCHMARK.md)。
 
 ### 全链路自检 `main.py doctor`
 
@@ -448,6 +467,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File <NapCat目录>\watchdog.ps1
 - [发展规划 Roadmap](docs/ROADMAP.md)：项目唯一路线图入口，含评分模型与分阶段排期。
 - [常见问题 FAQ](docs/FAQ.md)：定位、模型、风控、部署等统一口径。
 - [故障演练手册](docs/DR-DRILL.md)：NapCat 掉线、模型故障、推送失败、进程被杀等场景怎么验证「不丢事」。
+- [评测集与基线数字](docs/BENCHMARK.md)：脱敏评测集的指标定义、第一版基线与 CI 门槛。
 - [安全边界与数据流向](docs/SECURITY-BOUNDARY.md)：四条数据路径、配置加固清单、依赖供应链核查与第三方审计核实结果。
 - [贡献指南](CONTRIBUTING.md)：分支、测试、代码风格、隐私与安全要求。
 - [安全政策](SECURITY.md)：如何私密报告安全问题。
