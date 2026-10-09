@@ -161,12 +161,3 @@ Get-ScheduledTask NapCat-QQ* | Disable-ScheduledTask   # 按需：NapCat 相关�
 
 可以扩展为配置化规则（当前已有环境变量与群级策略雏形）。
 更合理的方向是**群级策略 / 规则 DSL**（见 ROADMAP A9 / A10），但不要声称所有规则现在都已做成配置项。
-
----
-
-## 六、协作
-
-### Q：别人说“用 GPT 改了代码，希望 Pull 一下”是什么意思？
-
-通常是对方 Fork 或建分支改完代码后提交 **Pull Request（PR）**，希望上游审查并合并。
-我们会按 `CONTRIBUTING.md` 和 PR 模板审查：**不会因为用了 GPT 就直接合并，也不会直接拒绝**。
