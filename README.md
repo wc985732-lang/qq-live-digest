@@ -81,6 +81,7 @@ Copy-Item .env.example .env
 - `QQ_DIGEST_GROUPS`：要监控的群号，逗号分隔。
   留空则**不处理任何群**（不会默认接收全部群）。
 - `QQ_DIGEST_ONEBOT_TOKEN`：与 NapCat OneBot HTTP 上报配置一致。
+  **v0.4.1 起**：留空时接收器只允许监听 `127.0.0.1` / `localhost` / `::1`，监听其它地址会拒绝启动。
 - `WXPUSHER_APP_TOKEN`、`WXPUSHER_UIDS`：推荐使用的微信推送通道。
 - `NTFY_TOPICS`、`TELEGRAM_BOT_TOKEN`+`TELEGRAM_CHAT_IDS`、`QQ_DIGEST_DISCORD_WEBHOOKS`、`QQ_DIGEST_WECOM_KEYS`、`QQ_DIGEST_SMTP_*`+`QQ_DIGEST_MAIL_TO`：A14 新增的多端通道（ntfy / Telegram / Discord / 企业微信 / 邮件），和已有通道一样参与失败回退。
 - `DASHSCOPE_API_KEY`：可选；不填会使用本地规则摘要。
