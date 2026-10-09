@@ -13,6 +13,7 @@ from typing import Any, Iterable, Iterator, Mapping
 
 from . import decisions
 from . import llmstats
+from . import taskstatus
 from .timeutil import iso, now_local, parse_iso
 
 LOGGER = logging.getLogger(__name__)
@@ -166,7 +167,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 """
 
 
-TASK_STATUSES = {"candidate", "open", "done", "dismissed", "expired"}
+TASK_STATUSES = taskstatus.TASK_STATUSES
 
 
 #: 人工纠错类型 → 人话标签（A8 反馈回收展示用）。
@@ -342,8 +343,10 @@ class Store:
         text = str(query or "").strip()
         if not text:
             return []
-        like = f"%{text}%"
-        where = ["(content LIKE ? OR source_text LIKE ?)"]
+        # 转义 LIKE 通配符：否则用户传 `%` 就等于扫全库，`_` 会变成任意字符匹配
+        escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        like = f"%{escaped}%"
+        where = ["(content LIKE ? ESCAPE '\\' OR source_text LIKE ? ESCAPE '\\')"]
         params: list[Any] = [like, like]
         if group_id:
             where.append("group_id = ?")

@@ -353,5 +353,41 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(stats["sent"], 1)
         self.assertEqual(stats["pending"], 0)
 
+
+class SearchEscapeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = Store(Path(self.tmp.name) / "search.sqlite3")
+
+    def _insert(self, msg_id: str, content: str) -> None:
+        self.store.insert_message(
+            msg_id=msg_id,
+            group_id="g1",
+            content=content,
+            source_text="",
+            sender_name="辅导员",
+            group_name="学院群",
+        )
+
+    def test_percent_is_literal_not_wildcard(self) -> None:
+        self._insert("m1", "进度 100% 完成")
+        self._insert("m2", "无关通知")
+        hits = self.store.search_messages("%")
+        self.assertEqual([row["msg_id"] for row in hits], ["m1"])
+
+    def test_underscore_is_literal(self) -> None:
+        self._insert("m1", "文件 a_b 已上传")
+        self._insert("m2", "文件 axb 已上传")
+        hits = self.store.search_messages("a_b")
+        self.assertEqual([row["msg_id"] for row in hits], ["m1"])
+
+    def test_backslash_is_literal(self) -> None:
+        self._insert("m1", r"路径 C:\临时 已建立")
+        self._insert("m2", "路径 C:临时 已建立")
+        hits = self.store.search_messages(r"C:\临时")
+        self.assertEqual([row["msg_id"] for row in hits], ["m1"])
+
+
 if __name__ == "__main__":
     unittest.main()
