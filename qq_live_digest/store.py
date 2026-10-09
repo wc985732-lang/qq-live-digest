@@ -324,6 +324,33 @@ class Store:
             self._append_jsonl(self.jsonl_path, payload)
         return inserted
 
+    def search_messages(
+        self, query: str, *, limit: int = 20, hours: int = 0, group_id: str = ""
+    ) -> list[dict[str, Any]]:
+        """按正文子串搜历史消息（只读，Roadmap A1）；hours>0 时只看最近 N 小时。"""
+        text = str(query or "").strip()
+        if not text:
+            return []
+        like = f"%{text}%"
+        where = ["(content LIKE ? OR source_text LIKE ?)"]
+        params: list[Any] = [like, like]
+        if group_id:
+            where.append("group_id = ?")
+            params.append(str(group_id))
+        if int(hours or 0) > 0:
+            where.append("received_at >= ?")
+            params.append(iso(now_local() - dt.timedelta(hours=int(hours))))
+        params.append(max(1, min(200, int(limit or 20))))
+        sql = (
+            "SELECT msg_id, group_id, group_name, sender_name, ts, received_at, content, source_text"
+            " FROM messages WHERE "
+            + " AND ".join(where)
+            + " ORDER BY received_at DESC, msg_id DESC LIMIT ?"
+        )
+        with self._connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
     def unprocessed_messages(self, *, limit: int = 400) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(

@@ -47,11 +47,12 @@ from qq_live_digest import decisions  # noqa: E402
 from qq_live_digest import events  # noqa: E402
 from qq_live_digest import grouppolicy  # noqa: E402
 from qq_live_digest import llmstats  # noqa: E402
+from qq_live_digest import mcp  # noqa: E402
 from qq_live_digest import observe  # noqa: E402
 from qq_live_digest import restapi  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
-from qq_live_digest.store import CORRECTION_LABELS  # noqa: E402
+from qq_live_digest.store import CORRECTION_LABELS, Store  # noqa: E402
 from qq_live_digest.weburl import build_web_url  # noqa: E402
 from qq_digest import Message  # noqa: E402
 from qq_live_digest.summarizer import Digest, finalize_digest, preview_text  # noqa: E402
@@ -528,6 +529,30 @@ def command_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_mcp(args: argparse.Namespace) -> int:
+    """只读 MCP 接口（Roadmap A1）：stdio 给 Cursor / Claude 查询通知、待办、截止与历史消息。"""
+    settings = load_settings(args)
+    if args.list_tools:
+        print(
+            json.dumps(
+                {
+                    "server": {"name": mcp.SERVER_NAME, "version": mcp.SERVER_VERSION},
+                    "read_only": True,
+                    "tools": mcp.list_tools(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    ensure_dirs(settings)
+    store = Store(
+        settings.data_dir / "digest.sqlite3",
+        retention_days=settings.message_retention_days,
+    )
+    return mcp.serve_stdio(store)
+
+
 def command_api(args: argparse.Namespace) -> int:
     """只读 REST API（Roadmap A15）：接口目录、鉴权状态与访问地址。"""
     settings = load_settings(args)
@@ -951,6 +976,10 @@ def build_parser() -> argparse.ArgumentParser:
     api_cmd = sub.add_parser("api", aliases=["rest"], help="只读 REST API（A15）：接口目录 / 鉴权状态 / 访问地址")
     api_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     api_cmd.set_defaults(func=command_api)
+
+    mcp_cmd = sub.add_parser("mcp", aliases=["mcp-serve"], help="只读 MCP 接口（A1）：stdio 给 Cursor / Claude 查询通知、待办、截止、历史消息")
+    mcp_cmd.add_argument("--list-tools", action="store_true", dest="list_tools", help="只打印 Tool 定义（调试用），不启动 stdio 会话")
+    mcp_cmd.set_defaults(func=command_mcp)
 
     panel = sub.add_parser("observe", aliases=["panel"], help="可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏）")
     panel.add_argument("--days", type=int, default=7, help="统计最近多少天（默认 7；1 = 按日、7 = 按周、30 = 按月）")

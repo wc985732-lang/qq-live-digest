@@ -44,12 +44,13 @@
 | `qq_live_digest/observe.py` | 可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏、只读聚合） |
 | `qq_live_digest/events.py` | 事件级跨群聚合：按对象+动作+时间+截止+来源把同一事件合成一条（默认关，可拆分） |
 | `qq_live_digest/restapi.py` | 只读 REST 数据口径：通知 / 待办 / 截止时间 / 面板（网页与 CLI 共用，只发 SELECT） |
+| `qq_live_digest/mcp.py` | 只读 MCP 接口：4 个只读 Tool（通知 / 待办 / 截止 / 搜索历史），stdio 给 Cursor / Claude 用 |
 | `qq_live_digest/summarizer.py` | 分级筛选、待办/截止提取、推送文本生成 |
 | `qq_live_digest/push.py` | WxPusher / Server酱 / PushPlus / Webhook / QQ 私聊，失败自动回退 |
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
-| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / groups / observe / events / api / simulate |
+| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / groups / observe / events / api / mcp / simulate |
 
 ## 环境要求
 
@@ -140,6 +141,9 @@ cd <项目目录>
 
 # 只读 REST API：接口目录 / 鉴权状态 / 访问地址（A15，字段见 docs/API.md）
 .\.venv\Scripts\python.exe main.py api
+
+# 只读 MCP 接口：4 个只读 Tool，stdio 给 Cursor / Claude 查询（A1，--list-tools 可离线打印 Tool 定义）
+.\.venv\Scripts\python.exe main.py mcp --list-tools
 
 # 可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏）
 .\.venv\Scripts\python.exe main.py observe

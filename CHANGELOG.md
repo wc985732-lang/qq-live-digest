@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-Phase 2「信息中枢」的头两块：事件级跨群聚合（`A11`）与只读 REST API（`A15`），外加一处时间窗脆弱测试的修复。
+Phase 2「信息中枢」的头三块：事件级跨群聚合（`A11`）、只读 REST API（`A15`）与只读 MCP 接口（`A1`），外加一处时间窗脆弱测试的修复。
 
 ### 新增
 - 新增**只读 REST API**（Roadmap `A15`）：待办台服务同端口对外提供自描述的只读接口
@@ -13,7 +13,13 @@ Phase 2「信息中枢」的头两块：事件级跨群聚合（`A11`）与只�
   `X-Token` 头或 `?token=` 查询参数鉴权，`/health` 免 token。新增 `qq_live_digest/restapi.py`
   （纯读、只发 SELECT），网页与 CLI 共用同一份字段口径；`/api/notices` 保留为 `/api/notifications`
   的历史别名；新增 `main.py api`（别名 `rest`）打印接口目录与访问地址；字段与边界写进 `docs/API.md`。
-  **只读**：不写库、不联网、不推送，也不开放 QQ 发送；计划中的 `A1`（MCP 只读）复用这份口径。
+  **只读**：不写库、不联网、不推送，也不开放 QQ 发送；随后的 `A1`（MCP 只读）直接复用这份口径。
+- 新增**只读 MCP 接口**（Roadmap `A1`）：把上面的只读口径包成 MCP Tool，`main.py mcp`（别名
+  `mcp-serve`）以标准 **stdio** 传输对外服务（一行一条 JSON-RPC 2.0，**stdout 只放协议消息**），
+  供 Cursor / Claude 等 MCP 客户端安全查询。**只暴露 4 个只读 Tool**——`recent_notifications` /
+  `todos` / `deadlines` / `search_messages`（关键词搜历史消息），没有任何写入、删除或发送能力；
+  `main.py mcp --list-tools` 可离线打印 Tool 定义。新增 `qq_live_digest/mcp.py`（协议层纯函数，
+  可脱离进程单测）；`search_messages` 的本地库查询落在 `store.search_messages`。
 - 新增**事件级跨群聚合**（Roadmap `A11`）：同一个事件被多个群先后转发时，不再各推一条，
   而是合成一条并标注来源群。判据不是字面相似，而是结构化的**事件键**——
   **对象 + 动作 + 时间 + 截止 + 来源**：对象取正文双字词，动作按行动词归一，

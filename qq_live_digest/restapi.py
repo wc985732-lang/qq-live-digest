@@ -103,3 +103,54 @@ def deadlines(
         "items": rows[:cap],
     }
 
+
+def todos(
+    store: Any,
+    *,
+    now: dt.datetime | None = None,
+    include_done: bool = False,
+    limit: int = 200,
+) -> dict[str, Any]:
+    """待办清单（只读）：未完成在前、逾期优先、越重要越靠前。"""
+    stamp = now or now_local()
+    cap = max(1, min(1000, int(limit or 200)))
+    if include_done:
+        tasks = store.list_tasks()
+    else:
+        tasks = store.list_tasks(statuses=("open", "candidate"))
+    items: list[dict[str, Any]] = []
+    for task in tasks:
+        moment = parse_iso(task.get("deadline"))
+        done = bool(task.get("done"))
+        items.append(
+            {
+                "id": int(task.get("id") or 0),
+                "summary": str(task.get("summary") or ""),
+                "action": str(task.get("action") or ""),
+                "category": str(task.get("category") or "info"),
+                "importance": int(task.get("importance") or 0),
+                "status": str(task.get("status") or ""),
+                "done": done,
+                "candidate": str(task.get("status") or "") == "candidate",
+                "deadline": iso(moment) if moment else "",
+                "overdue": bool(moment and not done and moment < stamp),
+                "groups": [str(name) for name in (task.get("groups") or [])],
+            }
+        )
+    items.sort(
+        key=lambda item: (
+            item["done"],
+            0 if item["overdue"] else 1,
+            -item["importance"],
+            item["deadline"] or "9999",
+            item["id"],
+        )
+    )
+    return {
+        "ok": True,
+        "as_of": iso(stamp),
+        "count": len(items[:cap]),
+        "total": len(items),
+        "overdue": sum(1 for item in items if item["overdue"]),
+        "items": items[:cap],
+    }

@@ -1,7 +1,7 @@
-# 只读 REST API（Roadmap A15）
+# 只读 REST + MCP 接口（Roadmap A15 / A1）
 
 待办台服务（`qq_live_digest/webapp.py`，默认 `0.0.0.0:8766`）同时对外提供一组**只读** REST 接口，
-给脚本、手机快捷指令，以及后续的 MCP 只读接口（`A1`）用。
+给脚本、手机快捷指令，以及 MCP 只读接口（`A1`）用。
 
 **它只读**：只发 SELECT，不写库、不联网、不推送，也不开放任何 QQ 发送能力。所有 `/api/*` 都要 token。
 
@@ -63,5 +63,24 @@ curl -s "http://127.0.0.1:8766/api/notifications?token=$TOKEN&limit=3"
 - **只读**：没有写接口。写待办（完成 / 忽略 / 纠错）由网页待办台的 `POST /api/tasks/<id>` 负责，属于用户交互，不在本节范围内。
 - **不开放 QQ 发送**：这套接口不会、也不能往群里发消息。
 - **脱敏**：`/api/panel` 的群号一律掩码；`/api/notifications` 只给摘要与截断正文，不带发送者。
-- 计划中的 `A1`（MCP 只读）会直接复用这里的 `qq_live_digest/restapi.py` 数据口径，不再另起一套。
+- `A1`（MCP 只读）已直接复用这里的 `qq_live_digest/restapi.py` 数据口径，不再另起一套（见下一节）。
 
+## MCP 只读接口（Roadmap A1）
+
+`main.py mcp`（别名 `mcp-serve`）以 MCP 的 **stdio** 传输对外服务：一行一条 JSON-RPC 2.0 消息，
+**stdout 只放协议消息**（日志走 stderr，避免污染协议流）。它复用上面同一份只读口径，同样只发 SELECT、
+不写库、不联网、不推送，也不开放任何 QQ 发送能力。
+
+| Tool | 参数 | 说明 |
+| --- | --- | --- |
+| `recent_notifications` | `limit`（1–50，默认 8） | 最近的通知摘要（正文截断 600 字，不带发送者） |
+| `todos` | `include_done`、`limit`（1–1000，默认 200） | 待办清单（未完成在前、逾期优先、越重要越靠前） |
+| `deadlines` | `include_done`、`limit`（1–1000，默认 200） | 带截止时间的待办，按截止升序并标出逾期 |
+| `search_messages` | `query`（必填）、`limit`（1–200，默认 20）、`hours`（0–8760，0=不限） | 按关键词搜历史群消息（本地库） |
+
+只暴露这 **4 个只读 Tool**，没有任何写入、删除或发送能力；`main.py mcp --list-tools` 可离线打印 Tool 定义。
+客户端配置示例（Cursor / Claude 等 MCP 客户端）：
+
+```json
+{ "mcpServers": { "qq-live-digest": { "command": "python", "args": ["main.py", "mcp"] } } }
+```
