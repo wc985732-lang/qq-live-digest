@@ -5,10 +5,11 @@
 
 ## 界面预览
 
-手机待办台：完成度卡片、紧急/待办标签、截止时间、群来源，以及“查看完整原文”和“纠错”入口。
+手机待办台：完成度卡片、紧急/待办/学业标签、截止时间与群来源；每张卡一行「详细 / 原文 / 纠错」
+开关（短标签给眼睛看，完整名称留给读屏），并支持跟随系统 / 浅色 / 深色主题。
 
 <p align="center">
-  <img src="docs/screenshots/mobile-tasks.jpg" width="380" alt="手机待办台：完成度卡片、紧急与待办标签、群来源、查看完整原文与纠错入口" />
+  <img src="docs/screenshots/mobile-tasks.jpg" width="380" alt="手机待办台：完成度卡片、紧急与待办标签、群来源，以及一行「详细 / 原文 / 纠错」开关" />
 </p>
 
 群聊降噪效果（26 秒）：假群里的一天 500 条消息，经本地规则过滤、重复合并后只剩 23 次通知，
@@ -459,6 +460,8 @@ QQ_DIGEST_QUIET_HOURS=23:00-07:00
 - 访问地址和 token：`python main.py tasks --import-existing`，命令会打印可访问的 URL。
 - 可观测面板：同一个服务还提供 `/panel`（过滤率 / 候选量 / 模型调用 / 推送成功率，群号掩码），token 与待办台相同。
 - 回填历史摘要：`python main.py tasks --reset --import-existing --days 7`。
+- 每张卡片一行「详细 / 原文 / 纠错」开关（命中区 44px，勾选圆点 45px）；外观在设置页切
+  「跟随系统 / 浅色 / 深色」，选择只存浏览器 `localStorage`，服务端不新增配置项。
 - 关闭待办台：`QQ_DIGEST_WEB=0`；改端口 `QQ_DIGEST_WEB_PORT`。
 
 事务闭环相关配置：
