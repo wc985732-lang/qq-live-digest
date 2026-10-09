@@ -41,13 +41,14 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 | 本地规则打分 → 候选 → 可选 LLM 两级处理 | 🟡 部分（无 Provider 抽象、无路由策略层） | `qq_digest.py` / `summarizer.py` |
 | 群文件/图片解析（PDF/Word/Excel/PPT/zip + OCR，OCR 不落盘） | ✅ 已上线 | `attachments.py` |
 | 跨群同通知去重、最近推送窗口二次去重 | ✅ 已上线 | `store.py` |
+| 事件级跨群聚合（对象+动作+时间+截止+来源；默认关，可拆分误合并） | ✅ 已上线 | `qq_live_digest/events.py` |
 | SQLite 结构化存储（messages/processed/digests/deliveries/tasks/task_events/decisions/llm_calls） | ✅ 已上线 | `store.py` |
 | 多通道推送 + 失败回退（WxPusher/Server酱/PushPlus/Webhook/QQ私聊） | ✅ 已上线 | `push.py` |
 | 手机待办台（今天/本周/以后/已完成，完成/忽略/纠错/稍后提醒） | ✅ 已上线 | `webapp.py` (8766) |
 | 截止提醒（07:30 / 21:00）+ 周复盘 | ✅ 已上线 | `service.py` |
 | 重启后 24h 历史补采 + 定时补偿 | ✅ 已上线 | `catchup.py` |
 | 看门狗自动重启 + 微信告警 | ✅ 已上线 | 外部 `watchdog.ps1` |
-| CLI：run/tick/preview/stats/show/tasks/catchup/doctor/send-test/attach-test/decisions/simulate/llm-stats | ✅ 已上线 | `main.py` |
+| CLI：run/tick/preview/stats/show/tasks/catchup/doctor/send-test/attach-test/decisions/simulate/llm-stats/groups/observe/events | ✅ 已上线 | `main.py` |
 | CI 单元测试（GitHub Actions） | ✅ 已上线 | `.github/workflows/tests.yml` |
 | 开源工程化（MIT、Topics、v0.1.0 Release、protect-main、Dependabot、Secret Scanning） | ✅ 已上线 | GitHub 仓库设置 |
 
@@ -111,7 +112,7 @@ Tailscale / SSH 隧道属于**访问层**，不参与消息理解；NapCat 掉�
 
 | # | 项目 | 现状 | V | S | C | R | M | I | 总分 | 工作量 | 依赖 |
 | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
-| A11 | 事件级跨群聚合（event_key：对象+动作+时间+截止+来源，可拆分误合并） | 🟡 | 5 | 5 | 3 | 3 | 3 | 3 | **4.00** | L | A33 |
+| A11 | 事件级跨群聚合（event_key：对象+动作+时间+截止+来源，可拆分误合并） | ✅ | 5 | 5 | 3 | 3 | 3 | 3 | **4.00** | L | A33 |
 | A15 | 只读 REST API（/notifications /tasks /deadlines /health，token 鉴权） | 🟡 | 4 | 5 | 4 | 3 | 4 | 3 | **3.95** | M | A28 |
 | A1 | MCP 只读接口（4 Tool：recent_notifications / todos / deadlines / search_messages） | ⬜ | 3 | 5 | 4 | 4 | 5 | 3 | **3.90** | M | A15 |
 | A13 | ICS/日历导出（明确时间的通知生成 ICS，先下载/订阅） | ⬜ | 4 | 4 | 4 | 3 | 2 | 4 | **3.65** | M | — |

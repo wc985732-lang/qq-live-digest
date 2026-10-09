@@ -44,6 +44,7 @@ from qq_live_digest.doctor import (  # noqa: E402
 from qq_live_digest.attachments import IMAGE_EXTS, Attachment  # noqa: E402
 from qq_live_digest import confidence  # noqa: E402
 from qq_live_digest import decisions  # noqa: E402
+from qq_live_digest import events  # noqa: E402
 from qq_live_digest import grouppolicy  # noqa: E402
 from qq_live_digest import llmstats  # noqa: E402
 from qq_live_digest import observe  # noqa: E402
@@ -442,6 +443,90 @@ def command_groups(args: argparse.Namespace) -> int:
         print('  {"123456": {"quiet": true, "min_score": 5, "keywords": ["考试"]}}')
     return 0
 
+def _recent_event_merges(store, *, limit: int = 5) -> list[dict[str, Any]]:
+    """从最近摘要里挑出发生过事件合并的条目（Roadmap A11），供 events 命令展示。"""
+    rows: list[dict[str, Any]] = []
+    for digest in store.recent_digests(limit=max(1, int(limit)) * 3):
+        for item in digest.get("items") or []:
+            if not isinstance(item, dict) or not item.get("event_merged"):
+                continue
+            groups = [
+                str(name) for name in (item.get("duplicate_groups") or []) if str(name).strip()
+            ]
+            rows.append(
+                {
+                    "digest_id": int(digest.get("id") or 0),
+                    "summary": str(item.get("summary") or ""),
+                    "merged": max(0, len(set(groups)) - 1),
+                    "groups": "、".join(dict.fromkeys(groups)),
+                    "key": str(item.get("event_key") or ""),
+                }
+            )
+            if len(rows) >= max(1, int(limit)):
+                return rows
+    return rows
+
+
+def command_events(args: argparse.Namespace) -> int:
+    """事件级跨群聚合（Roadmap A11）：开关、拆分覆盖与最近合并情况。"""
+    settings = load_settings(args)
+    service = build_service(settings, console=False)
+    store = service.store
+
+    if args.split:
+        key = args.split.strip()
+        if not store.add_event_split(key, reason=args.reason or "人工拆分"):
+            print("拆分键不能为空。")
+            return 2
+        print(f"已记录拆分覆盖：{key}")
+        print("这个事件之后不再自动合并；用 main.py events --unsplit <键> 撤销。")
+        return 0
+
+    if args.unsplit:
+        key = args.unsplit.strip()
+        if store.remove_event_split(key):
+            print(f"已撤销拆分覆盖：{key}")
+        else:
+            print(f"没有找到拆分覆盖：{key}")
+        return 0
+
+    splits = store.event_splits()
+    merges = _recent_event_merges(store, limit=args.limit or 5)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "enabled": bool(settings.event_merge),
+                    "env": "QQ_DIGEST_EVENT_MERGE",
+                    "splits": splits,
+                    "recent_merges": merges,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    state = "已开启" if settings.event_merge else "未开启（设 QQ_DIGEST_EVENT_MERGE=1 打开）"
+    print(f"事件级跨群聚合：{state}")
+    if merges:
+        print(f"最近摘要里的合并（{len(merges)} 条）：")
+        for row in merges:
+            print(f"  摘要 #{row['digest_id']} · {row['summary']}")
+            print(f"    合并 {row['merged']} 处 · {row['groups']}")
+            print(f"    事件键：{row['key']}")
+    else:
+        print("最近摘要里没有事件合并记录。")
+    if splits:
+        print(f"拆分覆盖 {len(splits)} 条（这些事件不再自动合并）：")
+        for row in splits:
+            extra = f" · {row['reason']}" if row["reason"] else ""
+            print(f"  {row['key']}{extra} · {row['created_at']}")
+    else:
+        print("还没有拆分覆盖；误合并时：main.py events --split <事件键> --reason 说明")
+    return 0
+
+
 def command_observe(args: argparse.Namespace) -> int:
     """消息处理可观测面板（Roadmap A32）：过滤率 / 候选量 / 模型调用 / 推送成功率。
 
@@ -823,6 +908,14 @@ def build_parser() -> argparse.ArgumentParser:
     groups = sub.add_parser("groups", aliases=["policies"], help="群级策略：每个群最终生效的开关")
     groups.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     groups.set_defaults(func=command_groups)
+
+    events_cmd = sub.add_parser("events", aliases=["aggregate"], help="事件级跨群聚合（A11）：开关、拆分覆盖、最近合并")
+    events_cmd.add_argument("--split", default="", help="把某个事件键标记为「不要自动合并」")
+    events_cmd.add_argument("--unsplit", default="", help="撤销某个事件键的拆分覆盖")
+    events_cmd.add_argument("--reason", default="", help="拆分原因（可选）")
+    events_cmd.add_argument("--limit", type=int, default=5, help="最多展示多少条近期合并（默认 5）")
+    events_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
+    events_cmd.set_defaults(func=command_events)
 
     panel = sub.add_parser("observe", aliases=["panel"], help="可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏）")
     panel.add_argument("--days", type=int, default=7, help="统计最近多少天（默认 7；1 = 按日、7 = 按周、30 = 按月）")

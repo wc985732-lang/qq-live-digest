@@ -166,6 +166,8 @@ class Settings:
     document_max_chars: int = 30000
     pdf_ocr_max_pages: int = 20
     dedupe_hours: int = 6
+    # A11 事件级跨群聚合：默认关，避免改变既有推送口径；用 QQ_DIGEST_EVENT_MERGE=1 打开
+    event_merge: bool = False
     html_push: bool = True
 
     # 截止提醒：早上列今天要做的，晚上再提醒一次
@@ -306,6 +308,7 @@ class Settings:
                 1, parse_int(get("QQ_DIGEST_PDF_OCR_MAX_PAGES", "20"), 20)
             ),
             dedupe_hours=max(0, parse_int(get("QQ_DIGEST_DEDUPE_HOURS", "6"), 6)),
+            event_merge=parse_bool(get("QQ_DIGEST_EVENT_MERGE", "0"), False),
             html_push=parse_bool(get("QQ_DIGEST_PUSH_HTML", "1"), True),
             deadline_reminders_enabled=parse_bool(
                 get("QQ_DIGEST_DEADLINE_REMINDERS", "1"), True
@@ -486,6 +489,7 @@ class Settings:
                 "pdf_ocr_max_pages": self.pdf_ocr_max_pages,
             },
             "dedupe_hours": self.dedupe_hours,
+            "event_merge": self.event_merge,
             "html_push": self.html_push,
             "deadline_reminders": {
                 "enabled": self.deadline_reminders_enabled,

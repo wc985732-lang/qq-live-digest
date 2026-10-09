@@ -322,6 +322,12 @@ class DigestService:
             self._bump_meta_counter(f"push_budget:{stamp:%Y-%m-%d}", count)
             self.last_push_at = stamp
 
+    def _event_splits(self) -> tuple[str, ...]:
+        """A11：用户标记过「不要自动合并」的事件键；没开事件聚合时返回空。"""
+        if not bool(getattr(self.settings, "event_merge", False)):
+            return ()
+        return self.store.event_split_keys()
+
     def _push_gate(self, stamp: dt.datetime, *, urgent: bool = False, ignore_quiet: bool = False) -> tuple[bool, str]:
         """非紧急推送的统一闸门：先看夜间静默，再看当日预算。"""
         if urgent:
@@ -817,7 +823,14 @@ class DigestService:
         if urgent:
             urgent_ids = {item["msg_id"] for item in urgent}
             subset = [record for record in records if record["msg_id"] in urgent_ids]
-            digest = build_digest(self.settings, subset, kind="urgent", now=stamp, history=history)
+            digest = build_digest(
+                self.settings,
+                subset,
+                kind="urgent",
+                now=stamp,
+                history=history,
+                event_splits=self._event_splits(),
+            )
             self._flush_decisions(digest, delivered=self._publish(digest, when=stamp))
             produced.append(digest)
             records = [record for record in records if record["msg_id"] not in urgent_ids]
@@ -835,7 +848,12 @@ class DigestService:
             if allowed:
                 immediate_ids = {record["msg_id"] for record in immediate_records}
                 digest = build_digest(
-                    self.settings, immediate_records, kind="window", now=stamp, history=history
+                    self.settings,
+                    immediate_records,
+                    kind="window",
+                    now=stamp,
+                    history=history,
+                    event_splits=self._event_splits(),
                 )
                 self._flush_decisions(digest, delivered=self._publish(digest, when=stamp))
                 produced.append(digest)
@@ -868,7 +886,14 @@ class DigestService:
             self._retry()
             return produced
 
-        digest = build_digest(self.settings, records, kind="window", now=stamp, history=history)
+        digest = build_digest(
+            self.settings,
+            records,
+            kind="window",
+            now=stamp,
+            history=history,
+            event_splits=self._event_splits(),
+        )
         if digest.items:
             self._flush_decisions(digest, delivered=self._publish(digest, when=stamp))
         else:

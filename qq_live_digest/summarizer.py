@@ -20,6 +20,7 @@ from qq_digest import Message  # noqa: E402
 
 from . import decisions  # noqa: E402
 from . import confidence  # noqa: E402
+from . import events  # noqa: E402
 from . import grouppolicy  # noqa: E402
 from . import llmstats  # noqa: E402
 from . import providers  # noqa: E402
@@ -103,6 +104,11 @@ class Digest:
                     "msg_id": item.get("msg_id", ""),
                     "confidence": dict(item.get("confidence") or {}),
                     "why": str(item.get("why") or ""),
+                    "duplicate_groups": [
+                        str(name) for name in (item.get("duplicate_groups") or []) if str(name).strip()
+                    ],
+                    "event_merged": bool(item.get("event_merged")),
+                    "event_key": events.event_key(item) if item.get("event_merged") else "",
                 }
             )
         return items
@@ -484,6 +490,7 @@ def _prepare_items(
     settings: Settings,
     history: Iterable[dict[str, Any]] | None = None,
     trail: list[dict[str, Any]] | None = None,
+    event_splits: Iterable[str] | None = None,
 ) -> tuple[list[dict[str, Any]], bool, str, bool]:
     candidates: list[dict[str, Any]] = []
     for item in analyses:
@@ -537,6 +544,23 @@ def _prepare_items(
             reason="与本批另一条要点相同",
         )
     candidates = deduped
+    if settings.event_merge:
+        candidates, merged_events = events.merge_items(
+            candidates, split_keys=event_splits or ()
+        )
+        for record in merged_events:
+            _append_trail(
+                trail,
+                record["item"],
+                settings,
+                stage=decisions.STAGE_EVENT,
+                outcome=decisions.MERGED,
+                reason=(
+                    f"与「{qq_digest.item_group(record['into']) or '同批另一条'}」"
+                    "判定为同一事件，合并推送"
+                ),
+                dedupe_reason=f"event {record['key']}",
+            )
     candidates.sort(key=lambda value: int(value.get("score") or 0), reverse=True)
     limit = int(settings.max_items)
     for item in candidates[limit:]:
@@ -682,6 +706,7 @@ def build_digest(
     kind: str = "window",
     now: dt.datetime | None = None,
     history: Iterable[dict[str, Any]] | None = None,
+    event_splits: Iterable[str] | None = None,
 ) -> Digest:
     stamp = now or now_local()
     analyses = analyse_records(records)
@@ -691,7 +716,9 @@ def build_digest(
         selected = analyses
 
     trail: list[dict[str, Any]] = []
-    items, llm_used, llm_error, llm_retryable = _prepare_items(selected, settings, history, trail)
+    items, llm_used, llm_error, llm_retryable = _prepare_items(
+        selected, settings, history, trail, event_splits
+    )
     groups: list[str] = []
     for record in records:
         name = str(record.get("group_name") or record.get("group_id") or "")

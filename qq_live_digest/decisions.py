@@ -20,15 +20,18 @@ PUSHED = "pushed"        # 进了摘要并且确实推送到至少一个通道
 HELD = "held"            # 进了摘要但本次没投出去（暂无通道 / 全部失败 / 稍后重试）
 FILTERED = "filtered"    # 被本地规则判定不值得处理
 DEDUPED = "deduped"      # 与最近已推内容或同批另一条重复
+MERGED = "merged"        # 与同批其它群的消息判定为同一事件，已合并（A11）
 TRUNCATED = "truncated"  # 命中但超出每批条数上限
 DUPLICATE = "duplicate"  # msg_id 重复，未入库
 REJECTED = "rejected"    # 入口拒绝：没有 msg_id，或群不在白名单
 DEFERRED = "deferred"    # 本该推送，但被夜间静默 / 当日额度 / 大模型失败推迟，还没有最终结论
 
-OUTCOMES = (PENDING, PUSHED, HELD, DEFERRED, FILTERED, DEDUPED, TRUNCATED, DUPLICATE, REJECTED)
+OUTCOMES = (
+    PENDING, PUSHED, HELD, DEFERRED, FILTERED, DEDUPED, MERGED, TRUNCATED, DUPLICATE, REJECTED
+)
 
 # 「为什么没推」——查询时最常问的几个
-NEGATIVE_OUTCOMES = (FILTERED, DEDUPED, TRUNCATED, REJECTED, DUPLICATE)
+NEGATIVE_OUTCOMES = (FILTERED, DEDUPED, MERGED, TRUNCATED, REJECTED, DUPLICATE)
 
 # 「还没落定」——这些行是暂态，后面会被同一批 / 下一次 tick 覆盖成最终结论
 UNDECIDED_OUTCOMES = (PENDING, DEFERRED)
@@ -40,17 +43,19 @@ OUTCOME_LABELS = {
     DEFERRED: "延后未决",
     FILTERED: "未命中",
     DEDUPED: "重复跳过",
+    MERGED: "事件合并",
     TRUNCATED: "超出上限",
     DUPLICATE: "重复消息",
     REJECTED: "入口拒绝",
 }
 
-# 决策点：入口 → 筛选 → 去重 → 投递
+# 决策点：入口 → 筛选 → 去重 → 事件聚合 → 投递
 STAGE_INTAKE = "intake"
 STAGE_FILTER = "filter"
 STAGE_DEDUPE = "dedupe"
+STAGE_EVENT = "event"
 STAGE_PUBLISH = "publish"
-STAGES = (STAGE_INTAKE, STAGE_FILTER, STAGE_DEDUPE, STAGE_PUBLISH)
+STAGES = (STAGE_INTAKE, STAGE_FILTER, STAGE_DEDUPE, STAGE_EVENT, STAGE_PUBLISH)
 
 # (分析结果里的字段, 展示用标签)
 _RULE_FIELDS = (
