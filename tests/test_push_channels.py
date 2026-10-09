@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import sys
+import ssl
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -106,6 +107,21 @@ class EmailTest(unittest.TestCase):
             EmailPusher("smtp.example", 587, recipients=["a@example"], starttls=True).send("t", "b")
         plain_factory.assert_called_once()
         self.assertTrue(server.starttls.called)
+
+    def test_tls_paths_verify_certificates(self) -> None:
+        """安全边界：两条 TLS 路径都必须传校验证书的 context，不能用 smtplib 默认的不校验 context。"""
+        with mock.patch.object(push.smtplib, "SMTP_SSL", return_value=mock.MagicMock()) as ssl_factory:
+            EmailPusher("smtp.example", 465, recipients=["a@example"]).send("t", "b")
+        ssl_context = ssl_factory.call_args.kwargs["context"]
+        self.assertEqual(ssl_context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(ssl_context.check_hostname)
+
+        plain = mock.MagicMock()
+        with mock.patch.object(push.smtplib, "SMTP", return_value=plain):
+            EmailPusher("smtp.example", 587, recipients=["a@example"], starttls=True).send("t", "b")
+        starttls_context = plain.starttls.call_args.kwargs["context"]
+        self.assertEqual(starttls_context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(starttls_context.check_hostname)
 
     def test_smtp_error_raises_push_error(self) -> None:
         with mock.patch.object(push.smtplib, "SMTP_SSL", side_effect=OSError("boom")):

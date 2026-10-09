@@ -8,6 +8,7 @@ import hashlib
 import json
 import logging
 import smtplib
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -25,6 +26,13 @@ QQ_TEXT_LIMIT = 900
 HTTP_TEXT_LIMIT = 1800
 HTML_BYTE_LIMIT = 60000  # WxPusher HTML 正文上限 65535 字节，留点余量
 USER_AGENT = "qq-live-digest/1.0"
+
+
+def _redact(text: str, secret: str) -> str:
+    """把 secret 从文案里抹掉，避免 token 混进日志 / 异常信息。"""
+    if not secret:
+        return str(text)
+    return str(text).replace(secret, "***")
 
 
 class PushError(RuntimeError):
@@ -289,6 +297,11 @@ class NtfyPusher(Pusher):
         self.base_url = (base_url or "https://ntfy.sh").rstrip("/")
         self.topic = topic
         self.token = token
+        if self.token and urllib.parse.urlparse(self.base_url).scheme != "https":
+            LOGGER.warning(
+                "ntfy 地址不是 https，已忽略 NTFY_TOKEN，避免凭证明文过网：%s", self.base_url
+            )
+            self.token = ""
         self.timeout = timeout
 
     def send(self, title: str, body: str, *, summary: str = "", html: str = "") -> None:
@@ -314,13 +327,17 @@ class TelegramPusher(Pusher):
     def send(self, title: str, body: str, *, summary: str = "", html: str = "") -> None:
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         for chunk in chunk_text(f"{title}\n{body}", 3500):
-            result = post_json(
-                url,
-                {"chat_id": self.chat_id, "text": chunk, "disable_web_page_preview": True},
-                self.timeout,
-            )
+            try:
+                result = post_json(
+                    url,
+                    {"chat_id": self.chat_id, "text": chunk, "disable_web_page_preview": True},
+                    self.timeout,
+                )
+            except PushError as error:
+                # Bot API 只认路径里的 token；异常文案里若混进 URL，先抹掉再抛出
+                raise PushError(_redact(str(error), self.bot_token)) from None
             if not result.get("ok"):
-                raise PushError(f"Telegram 返回异常: {str(result)[:200]}")
+                raise PushError(f"Telegram 返回异常: {_redact(str(result)[:200], self.bot_token)}")
 
 
 class DiscordPusher(Pusher):
@@ -356,7 +373,12 @@ class WeComPusher(Pusher):
 
 
 class EmailPusher(Pusher):
-    """SMTP 邮件：465 走 SSL，其它端口按 starttls 决定是否升级。"""
+    """SMTP 邮件：465 走 SSL，其它端口按 starttls 决定是否升级。
+
+    两条 TLS 路径都显式传入 `ssl.create_default_context()`：`smtplib` 在
+    `context=None` 时用的是不校验证书/主机名的 `ssl._create_stdlib_context()`，
+    会把 SMTP 账号密码与正文暴露给中间人。
+    """
 
     name = "email"
 
@@ -390,13 +412,16 @@ class EmailPusher(Pusher):
         message.set_content(body)
         if html:
             message.add_alternative(html, subtype="html")
+        context = ssl.create_default_context()
         try:
             if self.port == 465:
-                server: Any = smtplib.SMTP_SSL(self.host, self.port, timeout=self.timeout)
+                server: Any = smtplib.SMTP_SSL(
+                    self.host, self.port, timeout=self.timeout, context=context
+                )
             else:
                 server = smtplib.SMTP(self.host, self.port, timeout=self.timeout)
                 if self.starttls:
-                    server.starttls()
+                    server.starttls(context=context)
             with server:
                 if self.user:
                     server.login(self.user, self.password)

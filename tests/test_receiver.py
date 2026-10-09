@@ -200,6 +200,18 @@ class OneBotReceiverTest(unittest.TestCase):
         self.assertTrue(parsed["inserted"])
         self.assertEqual(len(self.received), 1)
 
+    def test_refuses_non_loopback_without_token(self) -> None:
+        settings = Settings(
+            group_whitelist=("123456",),
+            onebot_enabled=True,
+            onebot_host="0.0.0.0",
+            onebot_port=0,
+            onebot_token="",
+        )
+        receiver = OneBotReceiver(settings, self._on_message)
+        self.assertFalse(receiver.start())
+        self.assertIsNone(receiver.server)
+
 
 if __name__ == "__main__":
     unittest.main()

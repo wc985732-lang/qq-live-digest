@@ -117,19 +117,21 @@ class _Handler(BaseHTTPRequestHandler):
         token = getattr(self.server, "token", "")
         if not token:
             return True
+        expected = token.encode("utf-8")
         header = self.headers.get("Authorization", "")
         query = urllib.parse.urlparse(self.path).query
         params = urllib.parse.parse_qs(query)
-        if token in params.get("access_token", []):
+        supplied = params.get("access_token", [])
+        if any(hmac.compare_digest(str(item).encode("utf-8"), expected) for item in supplied):
             return True
         candidate = header[7:].strip() if header.startswith("Bearer ") else header.strip()
-        if candidate == token:
+        if candidate and hmac.compare_digest(candidate.encode("utf-8"), expected):
             return True
         body = getattr(self, "_raw_body", b"")
         signature = self.headers.get("X-Signature", "").strip()
         if signature.lower().startswith("sha1="):
-            expected = hmac.new(token.encode("utf-8"), body, hashlib.sha1).hexdigest()
-            if hmac.compare_digest(signature[5:].strip().lower(), expected):
+            signature_digest = hmac.new(token.encode("utf-8"), body, hashlib.sha1).hexdigest()
+            if hmac.compare_digest(signature[5:].strip().lower(), signature_digest):
                 return True
         names = ",".join(sorted(str(key).lower() for key in self.headers.keys()))
         LOGGER.warning(
@@ -288,6 +290,14 @@ class OneBotReceiver:
 
     def start(self) -> bool:
         if self.is_alive:
+            return False
+        host = str(self.settings.onebot_host or "")
+        if not str(self.settings.onebot_token or "") and host not in {"127.0.0.1", "localhost", "::1"}:
+            self.logger.error(
+                "拒绝启动 OneBot 接收器：监听 %s 但未设置 QQ_DIGEST_ONEBOT_TOKEN，"
+                "任何能连上的人都能伪造群消息；请设 token 或只监听 127.0.0.1。",
+                host,
+            )
             return False
         server = ThreadingHTTPServer((self.settings.onebot_host, self.settings.onebot_port), _Handler)
         server.token = self.settings.onebot_token  # type: ignore[attr-defined]
