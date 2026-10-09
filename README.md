@@ -41,12 +41,13 @@
 | `qq_live_digest/catchup.py` | 调用 NapCat API 补采历史消息，按 `msg_id` 去重 |
 | `qq_live_digest/store.py` | SQLite + JSONL：消息去重、摘要归档、投递去重、模型用量与重启恢复 |
 | `qq_live_digest/llmstats.py` | 模型用量词表与日 / 周 / 月聚合、token 成本折算 |
+| `qq_live_digest/observe.py` | 可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏、只读聚合） |
 | `qq_live_digest/summarizer.py` | 分级筛选、待办/截止提取、推送文本生成 |
 | `qq_live_digest/push.py` | WxPusher / Server酱 / PushPlus / Webhook / QQ 私聊，失败自动回退 |
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
-| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / groups / simulate |
+| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / groups / observe / simulate |
 
 ## 环境要求
 
@@ -131,6 +132,9 @@ cd <项目目录>
 
 # 群级策略：每个群最终生效的安静群 / 关键词 / 最低分 / 模型档 / 免打扰
 .\.venv\Scripts\python.exe main.py groups
+
+# 可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏）
+.\.venv\Scripts\python.exe main.py observe
 
 # 假群聊回放：500 条消息走完整链路，一条真实推送都不发（不联网、不碰 data/）
 .\.venv\Scripts\python.exe main.py simulate --count 500
@@ -268,6 +272,31 @@ QQ_DIGEST_GROUP_POLICIES={"123456": {"quiet": true, "min_score": 5, "keywords": 
 
 `doctor` 的「群白名单」一行会提示有几个群配了策略。
 
+### 消息处理面板 `main.py observe`
+
+跑得对不对，一眼看数字。`A32` 把「消息是怎么被处理的」摊开：收了多少条、判了多少条、过滤掉多少、
+攒出多少候选、调了几次模型、推成功几次——**全部脱敏**（群号掩码、不带正文），可以直接贴出来。
+
+| 段 | 数字 | 口径 |
+| --- | --- | --- |
+| 收 | 消息数 / 出现过的群数 / 最活跃的几个群（掩码） | 按消息时间归窗 |
+| 判 | 已决条数 / 过滤率 | 过滤率 = 未命中 / 已决；待投递、延后未决这类过程态不进分母 |
+| 候选 | 推送 + 保留 + 待确认 | 同一批消息的三种去向 |
+| 调 | 模型调用次数 / 失败次数 / token 用量 | 与 `main.py llm-stats` 同源 |
+| 推 | 推送成功率 | = 成功 /（成功 + 失败），待发不算分母 |
+| 办 | 候选待办 / 已确认 | 人工确认闭环 |
+
+数据不足时给 `0.0`，不假装 100%；时间窗口按半开区间取，刚写入的同秒数据不会漏。
+
+```powershell
+.\.venv\Scripts\python.exe main.py observe            # 最近 7 天（按日视图）
+.\.venv\Scripts\python.exe main.py observe --days 1   # 只看今天
+.\.venv\Scripts\python.exe main.py observe --json     # 交给脚本消费
+```
+
+开了待办台的话，同一个服务还提供网页版 `/panel`（token 与待办台相同）；`doctor` 的「可观测面板」
+一行给出最近 7 天的概况。
+
 ### 假群聊回放 `main.py simulate`
 
 想验证「500 条群消息最后剩下几条通知」，不用真去加群、也不用量自己的数据：
@@ -402,6 +431,7 @@ QQ_DIGEST_QUIET_HOURS=23:00-07:00
 - 同一任务同一天最多提醒一次；候选确认卡默认同一任务 24 小时最多一次，每天最多 4 张。
 - 每周日 20:30 生成一次简短复盘：候选数、确认率、忽略率、完成率、提醒数和逾期未完成数。
 - 访问地址和 token：`python main.py tasks --import-existing`，命令会打印可访问的 URL。
+- 可观测面板：同一个服务还提供 `/panel`（过滤率 / 候选量 / 模型调用 / 推送成功率，群号掩码），token 与待办台相同。
 - 回填历史摘要：`python main.py tasks --reset --import-existing --days 7`。
 - 关闭待办台：`QQ_DIGEST_WEB=0`；改端口 `QQ_DIGEST_WEB_PORT`。
 

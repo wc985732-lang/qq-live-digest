@@ -12,6 +12,7 @@
     python main.py benchmark      # 跑脱敏评测集，输出召回 / 误报 / 延迟 / 成本基线
     python main.py feedback       # 人工反馈回收：候选确认 / 忽略 / 纠错闭环
     python main.py groups         # 群级策略：每个群最终生效的开关（安静群 / 关键词 / 最低分 / 模型档）
+    python main.py observe      # 可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏）
     python main.py attach-test X  # 解析一个群文件/图片，只打印摘要不推送
 """
 
@@ -45,6 +46,7 @@ from qq_live_digest import confidence  # noqa: E402
 from qq_live_digest import decisions  # noqa: E402
 from qq_live_digest import grouppolicy  # noqa: E402
 from qq_live_digest import llmstats  # noqa: E402
+from qq_live_digest import observe  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
 from qq_live_digest.store import CORRECTION_LABELS  # noqa: E402
@@ -440,6 +442,28 @@ def command_groups(args: argparse.Namespace) -> int:
         print('  {"123456": {"quiet": true, "min_score": 5, "keywords": ["考试"]}}')
     return 0
 
+def command_observe(args: argparse.Namespace) -> int:
+    """消息处理可观测面板（Roadmap A32）：过滤率 / 候选量 / 模型调用 / 推送成功率。
+
+    数据来自决策日志、用量表与投递队列，全程只读；群号一律掩码，不打印正文、
+    发送者与密钥，所以这段输出可以直接贴进 Issue。网页版挂在待办台的 `/panel`。
+    """
+    settings = load_settings(args)
+    service = build_service(settings, console=False)
+    days = observe.clamp_days(getattr(args, "days", observe.DEFAULT_DAYS))
+    snap = observe.snapshot(service.store, days=days)
+    if args.json:
+        print(json.dumps(observe.payload(snap), ensure_ascii=False, indent=2))
+        return 0
+    print(observe.render_text(snap))
+    if settings.web_enabled:
+        panel_url = build_web_url(
+            settings,
+            token=str(settings.web_token or ""),
+            base_url=build_web_url(settings).rstrip("/") + "/panel",
+        )
+        print(f"  网页版：{panel_url}（token 与待办台相同）")
+    return 0
 
 def command_simulate(args: argparse.Namespace) -> int:
     """用假群聊把整条链路跑一遍（Roadmap A20）：消息 → 判定 → 摘要 → 内存假通道。
@@ -799,6 +823,11 @@ def build_parser() -> argparse.ArgumentParser:
     groups = sub.add_parser("groups", aliases=["policies"], help="群级策略：每个群最终生效的开关")
     groups.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     groups.set_defaults(func=command_groups)
+
+    panel = sub.add_parser("observe", aliases=["panel"], help="可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏）")
+    panel.add_argument("--days", type=int, default=7, help="统计最近多少天（默认 7；1 = 按日、7 = 按周、30 = 按月）")
+    panel.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
+    panel.set_defaults(func=command_observe)
 
     tasks = sub.add_parser("tasks", help="查看待办清单和手机访问地址")
     tasks.add_argument("--all", action="store_true", help="包含已完成")

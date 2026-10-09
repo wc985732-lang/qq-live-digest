@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterable, Sequence
 from . import providers
 from . import llmstats
 from . import confidence
+from . import observe
 from .bot import MISSING_BOTPY_HINT, botpy_available, botpy_version
 from .catchup import NapCatClient, NapCatError
 from .config import Settings
@@ -241,6 +242,25 @@ def check_llm_usage(ctx: DoctorContext) -> Check:
     return Check("模型用量", OK, detail)
 
 
+def check_panel(ctx: DoctorContext) -> Check:
+    """可观测面板（Roadmap A32）：最近的过滤率 / 候选量 / 推送成功率，一眼看链路是否正常。"""
+    try:
+        snap = observe.snapshot(ctx.store(), days=7)
+    except Exception as error:  # noqa: BLE001 - doctor 不能因为统计失败就崩
+        return Check("可观测面板", WARN, f"无法统计：{error}", "不影响摘要推送；稍后重试")
+    data = observe.payload(snap)
+    if not data["messages"]["total"]:
+        return Check(
+            "可观测面板", OK, "最近 7 天没有消息入库", "终端面板：python main.py observe"
+        )
+    return Check(
+        "可观测面板",
+        OK,
+        observe.headline(snap),
+        "详细面板：python main.py observe（或待办台的 /panel）",
+    )
+
+
 def check_confidence(ctx: DoctorContext) -> Check:
     """候选置信度分布：每条候选都带把握度与判定依据（A7）。"""
     threshold = float(ctx.settings.candidate_min_confidence or confidence.DEFAULT_LOW)
@@ -430,6 +450,7 @@ def run_checks(ctx: DoctorContext) -> list[Check]:
         check_onebot(ctx),
         check_llm(ctx),
         check_llm_usage(ctx),
+    check_panel(ctx),
         check_confidence(ctx),
         check_feedback(ctx),
         check_storage(ctx),

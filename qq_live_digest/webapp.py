@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import confidence
+from . import observe
 from .config import Settings
 from .store import Store
 from .timeutil import iso, now_local, parse_iso
@@ -813,6 +814,17 @@ class _Handler(BaseHTTPRequestHandler):
                     "stats": self.store.task_stats(),
                 },
             )
+            return
+        if path in ("/panel", "/panel.html"):
+            self._html(observe.render_page())
+            return
+        if path == "/api/panel":
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                days = int((query.get("days") or [str(observe.DEFAULT_DAYS)])[0])
+            except (TypeError, ValueError):
+                days = observe.DEFAULT_DAYS
+            self._json(200, observe.payload(observe.snapshot(self.store, days=days)))
             return
         self._json(404, {"ok": False, "error": "not found"})
 

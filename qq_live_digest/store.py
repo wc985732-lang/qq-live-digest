@@ -1338,6 +1338,56 @@ class Store:
             "completion_rate": round(completions * 100 / max(1, completions + overdue), 1),
         }
 
+    def message_metrics(self, *, start: str, end: str = "", top: int = 5) -> dict[str, Any]:
+        """窗口内的入库消息量：总数 / 涉及群数 / 消息最多的几个群（Roadmap A32）。
+
+        只出计数，不出正文与发送者——面板要能贴给别人看。
+        """
+        where = "received_at >= ?"
+        params: list[Any] = [start]
+        if end:
+            where += " AND received_at < ?"
+            params.append(end)
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT COUNT(*) AS total, COUNT(DISTINCT group_id) AS groups "
+                f"FROM messages WHERE {where}",
+                tuple(params),
+            ).fetchone()
+            rows = connection.execute(
+                f"SELECT group_id, COUNT(*) AS n FROM messages WHERE {where} "
+                "GROUP BY group_id ORDER BY n DESC LIMIT ?",
+                (*params, max(0, int(top))),
+            ).fetchall()
+        return {
+            "total": int(row["total"] or 0),
+            "distinct_groups": int(row["groups"] or 0),
+            "top_groups": [
+                {"group_id": str(item["group_id"] or ""), "messages": int(item["n"] or 0)}
+                for item in rows
+            ],
+        }
+
+    def delivery_metrics(self, *, start: str, end: str = "") -> dict[str, int]:
+        """窗口内的投递结果（按 updated_at 归窗）：成功 / 失败 / 待发（Roadmap A32）。"""
+        where = "updated_at >= ?"
+        params: list[Any] = [start]
+        if end:
+            where += " AND updated_at < ?"
+            params.append(end)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT status, COUNT(*) AS n FROM deliveries WHERE {where} GROUP BY status",
+                tuple(params),
+            ).fetchall()
+        data = {str(item["status"]): int(item["n"] or 0) for item in rows}
+        return {
+            "sent": data.get("sent", 0),
+            "pending": data.get("pending", 0),
+            "failed": data.get("failed", 0),
+            "total": sum(data.values()),
+        }
+
     def delivery_stats(self) -> dict[str, int]:
         """投递队列概况，用于 /health 观测推送是否堆积。"""
         with self._connect() as connection:
