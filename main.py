@@ -552,6 +552,28 @@ def command_conflicts(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_ab(args: argparse.Namespace) -> int:
+    """Prompt/模型 A/B（Roadmap A22）：固定评测集上对比两套配置的准确率 / 成本 / 延迟。"""
+    from qq_live_digest import abtest
+
+    if args.list_presets:
+        print("内置预设（--a/--b 可用预设名，也可直接给 JSON 对象）：")
+        for name, preset in abtest.PRESETS.items():
+            print(f"  {name:<10} {preset['label']}")
+        return 0
+    try:
+        specs = [abtest.parse_spec(args.a), abtest.parse_spec(args.b)]
+    except ValueError as error:
+        print(f"配置解析失败：{error}")
+        return 2
+    report = abtest.compare(specs, count=args.count, seed=args.seed)
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    else:
+        print(abtest.render(report))
+    return 0
+
+
 def command_ics(args: argparse.Namespace) -> int:
     """日历导出（Roadmap A13）：把有明确时间的待办导成 ICS，供手机 / 桌面日历订阅。"""
     settings = load_settings(args)
@@ -1031,6 +1053,15 @@ def build_parser() -> argparse.ArgumentParser:
     api_cmd = sub.add_parser("api", aliases=["rest"], help="只读 REST API（A15）：接口目录 / 鉴权状态 / 访问地址")
     api_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     api_cmd.set_defaults(func=command_api)
+
+    ab_cmd = sub.add_parser("ab", aliases=["abtest"], help="Prompt/模型 A/B（A22）：固定评测集对比两套配置的准确率/成本/延迟")
+    ab_cmd.add_argument("--a", default="default", help="配置 A：预设名或 JSON 对象")
+    ab_cmd.add_argument("--b", default="strict", help="配置 B：预设名或 JSON 对象")
+    ab_cmd.add_argument("--count", type=int, default=500, help="评测消息条数（默认 500）")
+    ab_cmd.add_argument("--seed", type=int, default=20261008, help="随机种子（固定评测集用）")
+    ab_cmd.add_argument("--list", action="store_true", dest="list_presets", help="列出内置预设")
+    ab_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
+    ab_cmd.set_defaults(func=command_ab)
 
     conflict_cmd = sub.add_parser("conflicts", aliases=["conflict"], help="时间冲突检测（A12）：截止时间相近的待办只提醒、不改任务")
     conflict_cmd.add_argument("--window", type=int, default=conflicts.DEFAULT_WINDOW_MINUTES, help="冲突窗口（分钟，默认 30）")

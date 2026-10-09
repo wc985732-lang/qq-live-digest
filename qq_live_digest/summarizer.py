@@ -615,6 +615,7 @@ def _prepare_items(
                         backoff=settings.llm_retry_backoff,
                         route=route.tier,
                         route_reason=route.reason,
+                        profile=settings.prompt_profile,
                     )
                     llm_used = True
                 except RuntimeError as error:

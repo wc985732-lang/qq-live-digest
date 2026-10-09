@@ -173,6 +173,10 @@ class Settings:
     llm_route_max_light_items: int = 6
     llm_route_easy_local: bool = False
 
+    # Prompt 档位（A22）：留空 = 现有提示词；terse / detailed 供 A/B 对比用，
+    # 只在配了 LLM Provider 时才真正影响输出。
+    prompt_profile: str = ""
+
     # 群文件 / 群图片解析
     attachments_enabled: bool = True
     attachment_max_mb: int = 10
@@ -321,6 +325,7 @@ class Settings:
                 1, parse_int(get("QQ_DIGEST_LLM_ROUTE_MAX_LIGHT_ITEMS", "6"), 6)
             ),
             llm_route_easy_local=parse_bool(get("QQ_DIGEST_LLM_ROUTE_EASY_LOCAL", "0"), False),
+            prompt_profile=get("QQ_DIGEST_PROMPT_PROFILE").strip(),
             attachments_enabled=parse_bool(get("QQ_DIGEST_ATTACHMENTS", "1"), True),
             attachment_max_mb=max(1, parse_int(get("QQ_DIGEST_ATTACHMENT_MAX_MB", "10"), 10)),
             attachment_max_per_hour=max(

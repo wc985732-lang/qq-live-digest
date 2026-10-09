@@ -1025,8 +1025,19 @@ def build_llm_prompt(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return payload
 
 
-def build_refine_messages(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
+# Prompt 档位（Roadmap A22）：只在配了 LLM Provider 时才影响实际输出，
+# 用于 A/B 对比不同提示词风格；留空 = 现有默认提示词，行为不变。
+PROMPT_PROFILES: dict[str, str] = {
+    "terse": "额外要求：summary 更短（不超过 40 个汉字），只留结论与关键动作，细节尽量并进 details。",
+    "detailed": "额外要求：summary 可放宽到 100 个汉字，把时间、地点、对象与例外尽量写全。",
+}
+
+
+def build_refine_messages(
+    selected: list[dict[str, Any]], *, profile: str = ""
+) -> list[dict[str, Any]]:
     """构造候选精炼的 chat messages（与具体供应商无关）。"""
+    style_note = PROMPT_PROFILES.get(str(profile or "").strip(), "")
     return [
         {
             "role": "system",
@@ -1056,7 +1067,9 @@ def build_refine_messages(selected: list[dict[str, Any]]) -> list[dict[str, Any]
                 "category 规则：urgent=今天或明天必须处理；action=需要报名/提交/缴费等；"
                 "academic=考试/课程/教务；info=其他值得知悉的通知。"
                 "importance 为 1-5，越高越重要。keep=false 表示纯闲聊、重复或可忽略。\n"
-                "严禁把只针对部分人的要求写成“所有同学”；严禁遗漏截止时间、附件和例外条件。\n\n消息："
+                "严禁把只针对部分人的要求写成“所有同学”；严禁遗漏截止时间、附件和例外条件。"
+                + (("\n" + style_note) if style_note else "")
+                + "\n\n消息："
                 + json.dumps(build_llm_prompt(selected), ensure_ascii=False)
             ),
         },
@@ -1071,6 +1084,7 @@ def refine_items(
     backoff: float = 1.5,
     route: str = "",
     route_reason: str = "",
+    profile: str = "",
 ) -> list[dict[str, Any]]:
     """用 provider 精炼候选条目：只改摘要相关字段，超出 50 条的尾部原样保留。
 
@@ -1082,7 +1096,7 @@ def refine_items(
     selected = items[:50]
     data = providers.complete_json_with_retries(
         provider,
-        build_refine_messages(selected),
+        build_refine_messages(selected, profile=profile),
         retries=retries,
         backoff=backoff,
         label="文本模型精炼",
