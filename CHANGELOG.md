@@ -5,6 +5,48 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-09
+
+### 安全
+- 修复 `EmailPusher` 走 587 + STARTTLS 时未传 TLS 上下文的问题：`smtplib` 的默认上下文是
+  `CERT_NONE`（既不校验证书也不校验主机名），SMTP 账号口令与摘要正文存在被中间人窃听的风险；
+  现在显式传 `ssl.create_default_context()`，`SMTP_SSL` 与 `starttls()` 两条路径都覆盖。
+- 修复 **dismissed / expired 待办泄露**：`conflicts`、ICS 导出、REST `/api/deadlines`、`/api/todos`
+  过去只排除 `done`，被忽略 / 过期归档的待办仍会出现在冲突提醒与日历里；新增
+  `qq_live_digest/taskstatus.py` 统一「完成 / 归档 / 仍开放」口径，日历与冲突一律跳过归档态，
+  `/api/todos` 与 `/api/deadlines` 的开放态口径也随之对齐（不再一个含 `candidate`、一个不含）。
+- 修复**待办台鉴权反转 + 缺 CSRF 校验**：过去 `web_host` 是回环且未配 token 时**不生成 token**，
+  等于本机部署谁都能改待办；现在无论监听回环还是对外都会生成 token 并落库。`do_POST` 现在拒绝
+  跨站写请求（`Origin` 与 `Host` 不一致直接 403），页面拿到 token 后立即 `history.replaceState`
+  把它从地址栏 / 历史 / Referer 里抹掉，不再常驻 URL。
+- 修复 OneBot 接收器**未设 token 仍监听非回环地址**的口子：这种配置等于局域网内任何人都能伪造
+  群消息，现在 `OneBotReceiver.start()` 直接拒绝启动并打印原因（只监听 `127.0.0.1` / `localhost` /
+  `::1` 才允许空 token）。
+- 修复 Web / OneBot 的 token 比较为**恒定时间**（`hmac.compare_digest`），避免逐字符比较的计时侧信道。
+- 修复 `store.search_messages` 的 **LIKE 通配符注入**：查询串里的 `%` / `_` / `\` 未转义，用户传
+  `%` 就等于扫全库；现在转义并显式 `ESCAPE '\'`。
+- 修复推送 token 泄露：Telegram 出错信息、Ntfy 明文 HTTP 场景下的 `NTFY_TOKEN` 现在会被遮蔽 /
+  丢弃，避免写进日志或发送到非 https 端点。
+
+### 修复
+- 修复 `mcp.call_tool` 遇到未知 Tool 名称直接抛 `KeyError` 的问题，改为返回 `isError` 结果。
+- 修复 `webapp.do_POST` 对非法 `Content-Length` 直接 `int()` 抛异常的问题。
+- 修复 `ics.fold_line` 续行长度：RFC 5545 的 75 字节上限**包含**续行前导空格，过去续行按 75 字节切
+  会超 1 字节，现在续行只放 74 字节。
+- 收紧事件合并判据：两侧都没有日期 / 来源 / 截止这类硬锚点时，要求**更多**对象词重叠才判定为同一
+  事件，减少「换个说法的闲聊」被误合并。
+- 收敛重复实现：新增 `qq_live_digest/redact.py`（`observe.mask_id` 与 `doctor._mask_id` 共用）、
+  `qq_live_digest/taskstatus.py`（状态口径）、`restapi.clamp_int`（`mcp._int_arg` / `webapp._query_int`
+  共用）；REST 的 `importance` / `id` 解析改为防御式，坏参数不再 500。
+
+### 破坏性 / 迁移
+- **待办台现在总是需要 token**：过去 `QQ_DIGEST_WEB_HOST` 是回环地址且未设 `QQ_DIGEST_WEB_TOKEN`
+  时页面不鉴权，v0.4.1 起无论监听哪里都会生成 token 并存入 SQLite `meta` 表；用
+  `python main.py tasks` 打印带 token 的访问地址。
+- **OneBot 未设 token 时不再监听非回环地址**：`QQ_DIGEST_ONEBOT_HOST` 不是 `127.0.0.1` /
+  `localhost` / `::1` 且 `QQ_DIGEST_ONEBOT_TOKEN` 为空时，接收器会拒绝启动；请补 token，或改回
+  只监听回环。
+
 ## [0.4.0] - 2026-10-09
 
 Phase 2「信息中枢」全部交付：事件级跨群聚合（`A11`）、只读 REST API（`A15`）、MCP 接口（`A1` 只读 +
