@@ -48,6 +48,7 @@ from qq_live_digest import events  # noqa: E402
 from qq_live_digest import grouppolicy  # noqa: E402
 from qq_live_digest import llmstats  # noqa: E402
 from qq_live_digest import observe  # noqa: E402
+from qq_live_digest import restapi  # noqa: E402
 from qq_live_digest.logging_setup import setup_logging  # noqa: E402
 from qq_live_digest.service import DigestService  # noqa: E402
 from qq_live_digest.store import CORRECTION_LABELS  # noqa: E402
@@ -527,6 +528,36 @@ def command_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_api(args: argparse.Namespace) -> int:
+    """只读 REST API（Roadmap A15）：接口目录、鉴权状态与访问地址。"""
+    settings = load_settings(args)
+    payload = restapi.index_payload()
+    host = str(settings.web_host or "127.0.0.1")
+    port = int(settings.web_port or 0)
+    server = {
+        "enabled": bool(settings.web_enabled),
+        "base_url": f"http://{host}:{port}",
+        "host": host,
+        "port": port,
+        "auth": bool(settings.web_token),
+    }
+    if args.json:
+        print(json.dumps({**payload, "server": server}, ensure_ascii=False, indent=2))
+        return 0
+    print(f"只读 REST API v{payload['api_version']}（只读：不写库、不联网、不推送）")
+    state = "已开启" if server["enabled"] else "未开启（设 QQ_DIGEST_WEB=1）"
+    print(f"  监听：{server['base_url']} · 待办台{state}")
+    if server["auth"]:
+        print("  鉴权：已配置 token（请求带 X-Token 头或 ?token=）")
+    else:
+        print("  鉴权：未配置 token（QQ_DIGEST_WEB_TOKEN）；非回环监听时会自动生成并落库")
+    print("  接口：")
+    for item in payload["endpoints"]:
+        mark = "需要 token" if item["auth"] else "免 token"
+        print(f"    {item['method']} {item['path']}  [{mark}] {item['desc']}")
+    return 0
+
+
 def command_observe(args: argparse.Namespace) -> int:
     """消息处理可观测面板（Roadmap A32）：过滤率 / 候选量 / 模型调用 / 推送成功率。
 
@@ -916,6 +947,10 @@ def build_parser() -> argparse.ArgumentParser:
     events_cmd.add_argument("--limit", type=int, default=5, help="最多展示多少条近期合并（默认 5）")
     events_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     events_cmd.set_defaults(func=command_events)
+
+    api_cmd = sub.add_parser("api", aliases=["rest"], help="只读 REST API（A15）：接口目录 / 鉴权状态 / 访问地址")
+    api_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
+    api_cmd.set_defaults(func=command_api)
 
     panel = sub.add_parser("observe", aliases=["panel"], help="可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏）")
     panel.add_argument("--days", type=int, default=7, help="统计最近多少天（默认 7；1 = 按日、7 = 按周、30 = 按月）")

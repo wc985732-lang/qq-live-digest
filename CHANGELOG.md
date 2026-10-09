@@ -5,9 +5,15 @@
 
 ## [Unreleased]
 
-Phase 2「信息中枢」的第一块：事件级跨群聚合（`A11`），外加一处时间窗脆弱测试的修复。
+Phase 2「信息中枢」的头两块：事件级跨群聚合（`A11`）与只读 REST API（`A15`），外加一处时间窗脆弱测试的修复。
 
 ### 新增
+- 新增**只读 REST API**（Roadmap `A15`）：待办台服务同端口对外提供自描述的只读接口
+  （`/api`、`/api/notifications`、`/api/tasks`、`/api/deadlines`、`/api/panel`、`/health`），
+  `X-Token` 头或 `?token=` 查询参数鉴权，`/health` 免 token。新增 `qq_live_digest/restapi.py`
+  （纯读、只发 SELECT），网页与 CLI 共用同一份字段口径；`/api/notices` 保留为 `/api/notifications`
+  的历史别名；新增 `main.py api`（别名 `rest`）打印接口目录与访问地址；字段与边界写进 `docs/API.md`。
+  **只读**：不写库、不联网、不推送，也不开放 QQ 发送；计划中的 `A1`（MCP 只读）复用这份口径。
 - 新增**事件级跨群聚合**（Roadmap `A11`）：同一个事件被多个群先后转发时，不再各推一条，
   而是合成一条并标注来源群。判据不是字面相似，而是结构化的**事件键**——
   **对象 + 动作 + 时间 + 截止 + 来源**：对象取正文双字词，动作按行动词归一，

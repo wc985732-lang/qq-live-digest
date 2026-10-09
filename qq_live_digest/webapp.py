@@ -13,6 +13,7 @@ from typing import Any
 
 from . import confidence
 from . import observe
+from . import restapi
 from .config import Settings
 from .store import Store
 from .timeutil import iso, now_local, parse_iso
@@ -734,10 +735,24 @@ class _Handler(BaseHTTPRequestHandler):
     def store(self) -> Store:
         return self.server.store  # type: ignore[attr-defined]
 
+    def _query(self) -> dict[str, list[str]]:
+        return urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+
+    def _query_int(self, name: str, default: int, low: int, high: int) -> int:
+        try:
+            value = int((self._query().get(name) or [str(default)])[0])
+        except (TypeError, ValueError):
+            value = default
+        return max(low, min(high, value))
+
+    def _query_flag(self, name: str) -> bool:
+        value = str((self._query().get(name) or [""])[0]).strip().lower()
+        return value in {"1", "true", "yes", "on"}
+
     def do_GET(self) -> None:  # noqa: N802 - 基类命名
         path = urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
         if path in ("/health", "/api/health"):
-            self._json(200, {"ok": True, "service": "qq-tasks"})
+            self._json(200, restapi.health_payload())
             return
         if path == "/manifest.webmanifest":
             self._asset(MANIFEST_JSON, "application/manifest+json; charset=utf-8")
@@ -751,6 +766,28 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._json(401, {"ok": False, "error": "invalid token"})
             return
+        if path == "/api":
+            self._json(200, restapi.index_payload())
+            return
+        if path in ("/api/notifications", "/api/notices"):
+            self._json(
+                200,
+                restapi.notifications(
+                    self.store, limit=self._query_int("limit", 8, 1, 50)
+                ),
+            )
+            return
+        if path == "/api/deadlines":
+            self._json(
+                200,
+                restapi.deadlines(
+                    self.store,
+                    now=now_local(),
+                    limit=self._query_int("limit", 200, 1, 1000),
+                    include_done=self._query_flag("include_done"),
+                ),
+            )
+            return
         if path in ("/", "/index.html"):
             self._html(PAGE_HTML)
             return
@@ -762,20 +799,6 @@ class _Handler(BaseHTTPRequestHandler):
             payload["stats"] = self.store.task_stats()
             payload.update(grouped)
             self._json(200, payload)
-            return
-        if path == "/api/notices":
-            items = []
-            for digest in self.store.recent_digests(limit=8):
-                items.append(
-                    {
-                        "id": digest.get("id"),
-                        "kind": digest.get("kind"),
-                        "created_at": digest.get("created_at"),
-                        "summary": f"{digest.get('item_count') or 0} 条重点",
-                        "body": str(digest.get("body") or "")[:600],
-                    }
-                )
-            self._json(200, {"items": items})
             return
         if path == "/api/insights":
             query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
