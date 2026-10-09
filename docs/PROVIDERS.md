@@ -45,6 +45,31 @@
 费用按上面两个单价**在展示时**折算，不写进数据库，所以换价目表可以重算全部历史；
 单价留空时只统计 token（`doctor` 会提示）。
 
+## 分级路由：规则 → 轻量 → 高能力（Roadmap A6）
+
+不是每一批候选都值得动用贵的模型。填上 `QQ_DIGEST_LLM_MODEL_LIGHT` 之后，系统会先路由再调用：
+
+| 档位 | 什么时候走 | 落库的 `route` |
+| --- | --- | --- |
+| 本地规则 | 只有打开 `QQ_DIGEST_LLM_ROUTE_EASY_LOCAL=1` 才会走：条数很少（≤2）且每条都已是高置信度 | `rule`（记一条「跳过」，不产生 token 成本） |
+| 轻量模型 | 其余情况的默认档：候选条数不多、分值不贴阈值、没有低置信度候选 | `light` |
+| 高能力模型 | 难例：候选超过 `QQ_DIGEST_LLM_ROUTE_MAX_LIGHT_ITEMS` 条、有候选分值贴着入摘要阈值、或 A7 判为低置信度 | `strong` |
+
+三条刻意的保守设定：
+
+1. **不填 `QQ_DIGEST_LLM_MODEL_LIGHT` 就等于没启用**——全部走高能力模型，行为和 A6 之前完全一致；
+2. 「本地规则直接交付」要显式打开 `QQ_DIGEST_LLM_ROUTE_EASY_LOCAL=1`：不声不响地少给模型干活是不行的；
+3. 难例判据只用确定性信号（条数、分值、A7 置信度），不做概率猜测。
+
+每次决定连同原因一起写进 `llm_calls.route` / `route_reason`，`main.py llm-stats` 会多打一行
+「路由分布：轻量模型 12、高能力模型 3」；`--recent` 的每条明细也会标出走的是哪一档。
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `QQ_DIGEST_LLM_MODEL_LIGHT` | 空 | 轻量模型名；留空 = 不启用分级路由 |
+| `QQ_DIGEST_LLM_ROUTE_MAX_LIGHT_ITEMS` | 6 | 候选超过这个条数算难例，直接交给高能力模型 |
+| `QQ_DIGEST_LLM_ROUTE_EASY_LOCAL` | 0 | 打开后：条数很少且都已高置信的批次干脆不调模型 |
+
 ## 接别的 OpenAI 兼容端点（最常见）
 
 绝大多数场景不用写代码，改两个变量即可，例如本地 Ollama：

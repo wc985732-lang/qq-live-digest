@@ -261,6 +261,7 @@ def command_llm_stats(args: argparse.Namespace) -> int:
                     "totals": totals,
                     "price": {"in_per_million": price_in, "out_per_million": price_out},
                     "top_errors": llmstats.top_errors(rows, limit=5),
+                    "routes": llmstats.route_counts(rows),
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -287,6 +288,10 @@ def command_llm_stats(args: argparse.Namespace) -> int:
     if int(totals.get("calls") or 0):
         print(f"用途分布：{llmstats.breakdown(totals.get('purposes') or {}, labels=llmstats.PURPOSE_LABELS)}")
         print(f"模型分布：{llmstats.breakdown(totals.get('models') or {})}")
+        print(
+            "路由分布："
+            f"{llmstats.breakdown(llmstats.route_counts(rows), labels=llmstats.ROUTE_LABELS)}"
+        )
     errors = llmstats.top_errors(rows, limit=3)
     if errors:
         print("失败原因 TOP：")

@@ -140,7 +140,9 @@ CREATE TABLE IF NOT EXISTS llm_calls (
     attempts          INTEGER NOT NULL DEFAULT 1,
     retried           INTEGER NOT NULL DEFAULT 0,
     fallback          INTEGER NOT NULL DEFAULT 0,
-    error             TEXT NOT NULL DEFAULT ''
+    error             TEXT NOT NULL DEFAULT '',
+    route             TEXT NOT NULL DEFAULT '',
+    route_reason      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at);
 CREATE INDEX IF NOT EXISTS idx_llm_calls_status ON llm_calls(status, created_at);
@@ -164,6 +166,12 @@ TASK_COLUMN_MIGRATIONS = {
     "remind_count": "INTEGER NOT NULL DEFAULT 0",
     "snooze_until": "TEXT NOT NULL DEFAULT ''",
     "duplicate_of": "INTEGER NOT NULL DEFAULT 0",
+}
+
+# A6 分级路由：老库补两列，缺省空串（渲染时算「未分级」）。
+LLM_CALL_COLUMN_MIGRATIONS = {
+    "route": "TEXT NOT NULL DEFAULT ''",
+    "route_reason": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -201,6 +209,7 @@ class Store:
             connection.executescript(SCHEMA)
             self._migrate_messages(connection)
             self._migrate_tasks(connection)
+            self._migrate_llm_calls(connection)
 
     @staticmethod
     def _migrate_messages(connection: sqlite3.Connection) -> None:
@@ -215,6 +224,15 @@ class Store:
         for name, definition in TASK_COLUMN_MIGRATIONS.items():
             if name not in existing:
                 connection.execute(f"ALTER TABLE tasks ADD COLUMN {name} {definition}")
+
+    @staticmethod
+    def _migrate_llm_calls(connection: sqlite3.Connection) -> None:
+        existing = {
+            str(row["name"]) for row in connection.execute("PRAGMA table_info(llm_calls)").fetchall()
+        }
+        for name, definition in LLM_CALL_COLUMN_MIGRATIONS.items():
+            if name not in existing:
+                connection.execute(f"ALTER TABLE llm_calls ADD COLUMN {name} {definition}")
 
     @staticmethod
     def _task_event(
@@ -416,8 +434,8 @@ class Store:
                 INSERT INTO llm_calls (
                     created_at, purpose, provider, model, status,
                     prompt_tokens, completion_tokens, latency_ms,
-                    attempts, retried, fallback, error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    attempts, retried, fallback, error, route, route_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     iso(created_at or now_local()),
@@ -432,6 +450,8 @@ class Store:
                     int(bool(getattr(call, "retried", False))),
                     int(bool(getattr(call, "fallback", False))),
                     str(getattr(call, "error", "") or "")[:500],
+                    str(getattr(call, "route", "") or ""),
+                    str(getattr(call, "route_reason", "") or "")[:200],
                 ),
             )
             return int(cursor.lastrowid or 0)

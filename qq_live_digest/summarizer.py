@@ -22,6 +22,7 @@ from . import decisions  # noqa: E402
 from . import confidence  # noqa: E402
 from . import llmstats  # noqa: E402
 from . import providers  # noqa: E402
+from . import routing  # noqa: E402
 from .config import Settings  # noqa: E402
 from .retry import llm_should_retry  # noqa: E402
 from .timeutil import now_local, parse_iso  # noqa: E402
@@ -509,18 +510,31 @@ def _prepare_items(
                 model=settings.dashscope_model,
             )
         else:
-            try:
-                candidates = qq_digest.refine_items(
-                    candidates,
-                    providers.build_provider(settings),
-                    retries=settings.llm_max_retries,
-                    backoff=settings.llm_retry_backoff,
+            # A6 分级路由：先决定这一批值不值得动用模型、动用哪一档，理由随用量一起落库。
+            route = routing.decide_route(candidates, settings)
+            if route.tier == llmstats.ROUTE_RULE:
+                # 本地规则足够：不调模型，但留一条记录说明「这次省了」，省得有账对不上。
+                providers.record_skip(
+                    purpose=llmstats.PURPOSE_REFINE,
+                    reason=route.reason,
+                    provider=providers.provider_name(settings),
+                    route=route.tier,
                 )
-                llm_used = True
-            except RuntimeError as error:
-                llm_error = str(error)
-                llm_retryable = llm_should_retry(error)
-                LOGGER.warning("LLM 精炼失败，回退本地规则：%s", error)
+            else:
+                try:
+                    candidates = qq_digest.refine_items(
+                        candidates,
+                        providers.build_provider(settings, model=route.model),
+                        retries=settings.llm_max_retries,
+                        backoff=settings.llm_retry_backoff,
+                        route=route.tier,
+                        route_reason=route.reason,
+                    )
+                    llm_used = True
+                except RuntimeError as error:
+                    llm_error = str(error)
+                    llm_retryable = llm_should_retry(error)
+                    LOGGER.warning("LLM 精炼失败，回退本地规则（%s）：%s", route.label, error)
     return (
         _finalize_items(qq_digest.sort_items(candidates), settings, llm_used=llm_used),
         llm_used,

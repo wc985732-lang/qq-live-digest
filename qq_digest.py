@@ -1069,6 +1069,8 @@ def refine_items(
     *,
     retries: int = 2,
     backoff: float = 1.5,
+    route: str = "",
+    route_reason: str = "",
 ) -> list[dict[str, Any]]:
     """用 provider 精炼候选条目：只改摘要相关字段，超出 50 条的尾部原样保留。
 
@@ -1085,6 +1087,8 @@ def refine_items(
         backoff=backoff,
         label="文本模型精炼",
         purpose=llmstats.PURPOSE_REFINE,
+        route=route,
+        route_reason=route_reason,
         temperature=0.1,
         max_tokens=3000,
     )

@@ -6,6 +6,14 @@
 ## [Unreleased]
 
 ### 新增
+- 新增**模型分级路由**（Roadmap `A6`）：`qq_live_digest/routing.py` 在调用模型前先决定这一批
+  走哪一档——本地规则 / 轻量模型 / 高能力模型——并把**原因**写进 `llm_calls` 新增的
+  `route` / `route_reason` 两列（老库自动补列）。难例判据只用确定性信号：候选超过
+  `QQ_DIGEST_LLM_ROUTE_MAX_LIGHT_ITEMS`（默认 6）条、有候选分值贴着入摘要阈值、或 A7 判为低置信度；
+  配了 `QQ_DIGEST_LLM_MODEL_LIGHT` 才启用（留空 = 行为与之前完全一致），
+  `QQ_DIGEST_LLM_ROUTE_EASY_LOCAL=1` 时条数很少且都已高置信的批次干脆不调模型（记一条「跳过」）。
+  `main.py llm-stats` 新增「路由分布」一行，`--recent` 明细标注档位；
+  新增 `tests/test_routing.py`（17 个用例：路由判据、用量表往返、老库迁移、真实链路接线，全程不联网）。
 - 新增**脱敏评测集与可复现指标**（Roadmap `A21`）：`simulator.generate()` 给每条消息附一个
   `_expect` 意图标注（该不该推 / 该不该建待办 / 文本里有没有截止时间），新增
   `qq_live_digest/benchmark.py` 把它当 ground truth，跑真实链路回放后输出

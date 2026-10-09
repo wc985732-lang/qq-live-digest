@@ -147,6 +147,12 @@ class Settings:
     llm_price_in: float = 0.0
     llm_price_out: float = 0.0
 
+    # 模型分级路由（A6）：配了轻量模型就按「规则 → 轻量 → 高能力」分流，并把路由原因
+    # 记进 llm_calls。留空 = 不启用分级，一切照旧走高能力模型。
+    llm_model_light: str = ""
+    llm_route_max_light_items: int = 6
+    llm_route_easy_local: bool = False
+
     # 群文件 / 群图片解析
     attachments_enabled: bool = True
     attachment_max_mb: int = 10
@@ -273,6 +279,11 @@ class Settings:
             ),
             llm_price_in=max(0.0, parse_float(get("QQ_DIGEST_LLM_PRICE_IN", "0"), 0.0)),
             llm_price_out=max(0.0, parse_float(get("QQ_DIGEST_LLM_PRICE_OUT", "0"), 0.0)),
+            llm_model_light=get("QQ_DIGEST_LLM_MODEL_LIGHT", "").strip(),
+            llm_route_max_light_items=max(
+                1, parse_int(get("QQ_DIGEST_LLM_ROUTE_MAX_LIGHT_ITEMS", "6"), 6)
+            ),
+            llm_route_easy_local=parse_bool(get("QQ_DIGEST_LLM_ROUTE_EASY_LOCAL", "0"), False),
             attachments_enabled=parse_bool(get("QQ_DIGEST_ATTACHMENTS", "1"), True),
             attachment_max_mb=max(1, parse_int(get("QQ_DIGEST_ATTACHMENT_MAX_MB", "10"), 10)),
             attachment_max_per_hour=max(
@@ -450,6 +461,7 @@ class Settings:
             "llm_defer_max_attempts": self.llm_defer_max_attempts,
             "llm_price_in": self.llm_price_in,
             "llm_price_out": self.llm_price_out,
+            "llm_model_light": self.llm_model_light,
             "include_raw": self.include_raw,
             "attachments": {
                 "enabled": bool(self.attachments_enabled and self.dashscope_api_key),

@@ -285,6 +285,12 @@ A7 之前归档的老摘要没有这条记录，`show` 会如实写「这条没�
 只要保持 `QQ_DIGEST_LLM_PROVIDER=openai-compat` 并改 `QQ_DIGEST_LLM_ENDPOINT` 就能接上；
 非兼容协议如何接入见 `docs/PROVIDERS.md`。设成 `QQ_DIGEST_LLM_PROVIDER=none` 可彻底关闭模型调用。
 
+想省成本可以开启**分级路由**（Roadmap `A6`）：填上 `QQ_DIGEST_LLM_MODEL_LIGHT`（例如
+`qwen-turbo`）后，清晰的小批次走轻量模型，只有难例（候选偏多、分值贴着阈值、A7 判为低置信度）
+才升级到 `QQ_DIGEST_LLM_MODEL` 指定的高能力模型；每次走了哪一档、为什么，都记进
+`llm_calls` 并由 `main.py llm-stats` 的「路由分布」展示。留空 = 不启用，行为与之前一致；
+详见 `docs/PROVIDERS.md`。
+
 ## 推送卡片与截止提醒
 
 WxPusher 走 HTML 卡片（`QQ_DIGEST_PUSH_HTML=1`），通知栏和卡片标题用一句话摘要：

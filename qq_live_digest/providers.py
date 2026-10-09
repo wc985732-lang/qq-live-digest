@@ -79,6 +79,8 @@ class LLMCall:
     retried: bool = False
     fallback: bool = False
     error: str = ""
+    route: str = ""
+    route_reason: str = ""
 
     @property
     def total_tokens(self) -> int:
@@ -345,7 +347,15 @@ def report_call(call: LLMCall) -> None:
         LOGGER.warning("写入模型用量失败", exc_info=True)
 
 
-def record_skip(*, purpose: str, reason: str, provider: str = "", model: str = "") -> None:
+def record_skip(
+    *,
+    purpose: str,
+    reason: str,
+    provider: str = "",
+    model: str = "",
+    route: str = "",
+    route_reason: str = "",
+) -> None:
     """记录一次「本该调用模型却跳过了」（如没配密钥）：让成本面板能解释「为什么一条都没有」。"""
     report_call(
         LLMCall(
@@ -356,6 +366,8 @@ def record_skip(*, purpose: str, reason: str, provider: str = "", model: str = "
             attempts=0,
             fallback=True,
             error=str(reason or ""),
+            route=str(route or ""),
+            route_reason=str(route_reason or reason or "")[:200],
         )
     )
 
@@ -372,10 +384,20 @@ def _as_result(value: Any) -> LLMResult | None:
 class _CallTracker:
     """把重试过程中的每次尝试汇总成一条 `LLMCall`。"""
 
-    def __init__(self, provider: LLMProvider, *, purpose: str, fallback_on_error: bool) -> None:
+    def __init__(
+        self,
+        provider: LLMProvider,
+        *,
+        purpose: str,
+        fallback_on_error: bool,
+        route: str = "",
+        route_reason: str = "",
+    ) -> None:
         self.provider = provider
         self.purpose = purpose
         self.fallback_on_error = bool(fallback_on_error)
+        self.route = str(route or "")
+        self.route_reason = str(route_reason or "")
         self.attempts = 0
         self.result: LLMResult | None = None
         self.error: BaseException | None = None
@@ -410,6 +432,8 @@ class _CallTracker:
                 retried=self.attempts > 1,
                 fallback=bool(failed and self.fallback_on_error),
                 error=f"{type(self.error).__name__}: {self.error}" if failed else "",
+                route=self.route,
+                route_reason=self.route_reason[:200],
             )
         )
 
@@ -424,6 +448,8 @@ def complete_with_retries(
     label: str = "模型调用",
     purpose: str = llmstats.PURPOSE_CHAT,
     fallback_on_error: bool = True,
+    route: str = "",
+    route_reason: str = "",
     **kwargs: Any,
 ) -> LLMResult:
     """按 `llm_should_retry` 判定重试的调用（限流/5xx/超时/格式异常才重试）。
@@ -431,7 +457,13 @@ def complete_with_retries(
     `purpose` 用于成本面板分类；`fallback_on_error` 表示失败后调用方有本地回退路径
     （用于区分「降级」与「直接失败」）。
     """
-    tracker = _CallTracker(provider, purpose=purpose, fallback_on_error=fallback_on_error)
+    tracker = _CallTracker(
+        provider,
+        purpose=purpose,
+        fallback_on_error=fallback_on_error,
+        route=route,
+        route_reason=route_reason,
+    )
     try:
         result = call_with_retries(
             lambda: provider.complete(messages, **kwargs),
@@ -457,10 +489,18 @@ def complete_json_with_retries(
     label: str = "模型调用",
     purpose: str = llmstats.PURPOSE_CHAT,
     fallback_on_error: bool = True,
+    route: str = "",
+    route_reason: str = "",
     **kwargs: Any,
 ) -> dict[str, Any]:
     """要 JSON 的重试版：连「返回内容不是 JSON」也一起重试。用量同样落库。"""
-    tracker = _CallTracker(provider, purpose=purpose, fallback_on_error=fallback_on_error)
+    tracker = _CallTracker(
+        provider,
+        purpose=purpose,
+        fallback_on_error=fallback_on_error,
+        route=route,
+        route_reason=route_reason,
+    )
     try:
         value = call_with_retries(
             lambda: provider.complete_json_result(messages, **kwargs),

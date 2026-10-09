@@ -43,6 +43,21 @@ STATUS_LABELS = {
     STATUS_SKIPPED: "跳过",
 }
 
+# ------------------------------------------------------------------ 路由词表（A6）
+ROUTE_RULE = "rule"        # 本地规则直接交付，没调模型（分级路由的第三档）
+ROUTE_LIGHT = "light"      # 轻量 / 便宜模型：清晰、量小的批次
+ROUTE_STRONG = "strong"    # 高能力模型：难例才动用
+ROUTE_DEFAULT = "default"  # 没启用分级路由（或早于 A6 的历史记录）
+
+ROUTES = (ROUTE_RULE, ROUTE_LIGHT, ROUTE_STRONG, ROUTE_DEFAULT)
+
+ROUTE_LABELS = {
+    ROUTE_RULE: "本地规则",
+    ROUTE_LIGHT: "轻量模型",
+    ROUTE_STRONG: "高能力模型",
+    ROUTE_DEFAULT: "未分级",
+}
+
 # ------------------------------------------------------------------ 周期词表
 PERIOD_DAY = "day"
 PERIOD_WEEK = "week"
@@ -68,6 +83,20 @@ def purpose_label(purpose: str) -> str:
 def status_label(status: str) -> str:
     value = str(status or "")
     return STATUS_LABELS.get(value, value or "未知")
+
+
+def route_label(route: str) -> str:
+    value = str(route or "")
+    return ROUTE_LABELS.get(value, value or "未分级")
+
+
+def route_counts(rows: Iterable[Mapping[str, Any]]) -> dict[str, int]:
+    """按路由档位统计调用次数；没写 route 的记录（历史数据）算「未分级」。"""
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("route") or "") or ROUTE_DEFAULT
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 def parse_period(value: str) -> str:
@@ -377,6 +406,9 @@ def describe_calls(
         stamp = str(row.get("created_at") or "").replace("T", " ")[:19]
         status = status_label(str(row.get("status") or ""))
         model = str(row.get("model") or row.get("provider") or "未知模型")
+        route = str(row.get("route") or "")
+        if route:
+            model = f"{model} · {route_label(route)}"
         tokens = int(row.get("prompt_tokens") or 0) + int(row.get("completion_tokens") or 0)
         head = (
             f"{stamp}  [{status}] {purpose_label(str(row.get('purpose') or ''))} · {model}"
