@@ -24,6 +24,7 @@ ENDPOINTS = (
     {"path": "/api/tasks", "method": "GET", "auth": True, "desc": "待办清单（今天 / 本周 / 以后 / 已完成）"},
     {"path": "/api/deadlines", "method": "GET", "auth": True, "desc": "带截止时间的待办，按时间升序"},
     {"path": "/api/calendar.ics", "method": "GET", "auth": True, "desc": "有明确时间的待办导出为 iCalendar（ICS）"},
+    {"path": "/api/conflicts", "method": "GET", "auth": True, "desc": "潜在时间冲突：截止时间相近的待办按组返回"},
     {"path": "/api/panel", "method": "GET", "auth": True, "desc": "消息处理可观测面板（脱敏）"},
 )
 

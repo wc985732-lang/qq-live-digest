@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from . import confidence
+from . import conflicts
 from . import ics
 from . import observe
 from . import restapi
@@ -803,6 +804,17 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", 'attachment; filename="qq-digest.ics"')
             self.end_headers()
             self.wfile.write(raw)
+            return
+        if path == "/api/conflicts":
+            self._json(
+                200,
+                conflicts.payload(
+                    self.store.list_tasks(),
+                    now=now_local(),
+                    window_minutes=self._query_int("window", conflicts.DEFAULT_WINDOW_MINUTES, 0, 1440),
+                    include_done=self._query_flag("include_done"),
+                ),
+            )
             return
         if path in ("/", "/index.html"):
             self._html(PAGE_HTML)

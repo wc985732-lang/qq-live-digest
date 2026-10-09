@@ -22,6 +22,7 @@
 | GET | `/api/tasks` | 需要 | 待办清单（今天 / 本周 / 以后 / 已完成 / 待确认分组） |
 | GET | `/api/deadlines` | 需要 | 带截止时间的待办，按时间升序，标出逾期 |
 | GET | `/api/calendar.ics` | 需要 | 有明确时间的待办导出为 iCalendar（`text/calendar`） |
+| GET | `/api/conflicts` | 需要 | 潜在时间冲突：截止时间相近的待办按组返回 |
 | GET | `/api/panel` | 需要 | 消息处理可观测面板（脱敏聚合） |
 
 `/api/notices` 作为 `/api/notifications` 的历史别名保留，网页待办台仍在用。
@@ -29,6 +30,9 @@
 `/api/calendar.ics` 把有明确时间的待办导成 iCalendar（RFC 5545），可直接导入或订阅日历：
 时间以浮动本地时间写出，只有日期没有时刻的截止按**全天事件**（`VALUE=DATE`）导出，
 没有截止时间的待办不导出；`?include_done=1` 可把已完成待办也带上。同样是**只读**的。
+
+`/api/conflicts` 检测潜在时间冲突：把**截止时间**落在同一时间窗（`?window=` 分钟，默认 30）内的
+多个待办按组返回（`conflicts[].items`），只提醒、**不擅自改任务**；`?include_done=1` 可带上已完成。
 
 ## 查询参数
 

@@ -43,6 +43,7 @@ from qq_live_digest.doctor import (  # noqa: E402
 )
 from qq_live_digest.attachments import IMAGE_EXTS, Attachment  # noqa: E402
 from qq_live_digest import confidence  # noqa: E402
+from qq_live_digest import conflicts  # noqa: E402
 from qq_live_digest import decisions  # noqa: E402
 from qq_live_digest import events  # noqa: E402
 from qq_live_digest import grouppolicy  # noqa: E402
@@ -530,6 +531,27 @@ def command_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_conflicts(args: argparse.Namespace) -> int:
+    """时间冲突检测（Roadmap A12）：截止时间相近的待办只提醒，不擅自改任务。"""
+    settings = load_settings(args)
+    ensure_dirs(settings)
+    store = Store(
+        settings.data_dir / "digest.sqlite3",
+        retention_days=settings.message_retention_days,
+    )
+    report = conflicts.payload(
+        store.list_tasks(),
+        now=now_local(),
+        window_minutes=args.window,
+        include_done=args.include_done,
+    )
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(conflicts.render(report))
+    return 0
+
+
 def command_ics(args: argparse.Namespace) -> int:
     """日历导出（Roadmap A13）：把有明确时间的待办导成 ICS，供手机 / 桌面日历订阅。"""
     settings = load_settings(args)
@@ -1009,6 +1031,12 @@ def build_parser() -> argparse.ArgumentParser:
     api_cmd = sub.add_parser("api", aliases=["rest"], help="只读 REST API（A15）：接口目录 / 鉴权状态 / 访问地址")
     api_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
     api_cmd.set_defaults(func=command_api)
+
+    conflict_cmd = sub.add_parser("conflicts", aliases=["conflict"], help="时间冲突检测（A12）：截止时间相近的待办只提醒、不改任务")
+    conflict_cmd.add_argument("--window", type=int, default=conflicts.DEFAULT_WINDOW_MINUTES, help="冲突窗口（分钟，默认 30）")
+    conflict_cmd.add_argument("--include-done", action="store_true", dest="include_done", help="包含已完成待办")
+    conflict_cmd.add_argument("--json", action="store_true", help="以 JSON 输出，便于脚本消费")
+    conflict_cmd.set_defaults(func=command_conflicts)
 
     ics_cmd = sub.add_parser("ics", aliases=["calendar"], help="日历导出（A13）：把有明确时间的待办导成 ICS")
     ics_cmd.add_argument("--out", default="", help="输出文件路径（默认 data/calendar.ics）")

@@ -46,12 +46,13 @@
 | `qq_live_digest/restapi.py` | 只读 REST 数据口径：通知 / 待办 / 截止时间 / 面板（网页与 CLI 共用，只发 SELECT） |
 | `qq_live_digest/mcp.py` | 只读 MCP 接口：4 个只读 Tool（通知 / 待办 / 截止 / 搜索历史），stdio 给 Cursor / Claude 用 |
 | `qq_live_digest/ics.py` | 日历导出：把有明确时间的待办导成 iCalendar（只读，供手机 / 桌面日历订阅） |
+| `qq_live_digest/conflicts.py` | 时间冲突检测：截止时间相近的待办按组提醒（只读，不擅自改任务） |
 | `qq_live_digest/summarizer.py` | 分级筛选、待办/截止提取、推送文本生成 |
 | `qq_live_digest/push.py` | WxPusher / Server酱 / PushPlus / Webhook / QQ 私聊，失败自动回退 |
 | `qq_live_digest/service.py` | 10 分钟滚动窗口、紧急立即推、无重点不推、失败重试 |
 | `qq_live_digest/bot.py` | 可选的 QQ 官方机器人，当前关闭 |
 | 外部 `watchdog.ps1` | 可选的健康检查、自动重启和故障告警脚本，部署在 NapCat 目录 |
-| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / groups / observe / events / api / ics / mcp / simulate |
+| `main.py` | CLI：run / catchup / tick / preview / send-test / doctor / stats / decisions / llm-stats / feedback / groups / observe / events / api / conflicts / ics / mcp / simulate |
 
 ## 环境要求
 
@@ -148,6 +149,9 @@ cd <项目目录>
 
 # 日历导出：把有明确时间的待办导成 ICS，导入手机 / 桌面日历（A13）
 .\.venv\Scripts\python.exe main.py ics
+
+# 时间冲突检测：截止时间相近的待办按组提醒，只提醒不改任务（A12）
+.\.venv\Scripts\python.exe main.py conflicts
 
 # 可观测面板：过滤率 / 候选量 / 模型调用 / 推送成功率（脱敏）
 .\.venv\Scripts\python.exe main.py observe
