@@ -154,11 +154,19 @@ def check_onebot(ctx: DoctorContext) -> Check:
         return Check("OneBot 接收器", OK, "未启用（仅补采模式）")
     if str(settings.onebot_token or "").strip():
         return Check("OneBot 接收器", OK, f"监听 {where}，已设置上报 token")
+    if not _is_loopback(settings.onebot_host):
+        # v0.4.1 起：非回环地址 + 无 token 时接收器直接拒绝启动，服务等于收不到任何群消息。
+        return Check(
+            "OneBot 接收器",
+            FAIL,
+            f"监听 {where} 且未设置上报 token，接收器会拒绝启动",
+            "设置 QQ_DIGEST_ONEBOT_TOKEN；或把 QQ_DIGEST_ONEBOT_HOST 改回 127.0.0.1",
+        )
     return Check(
         "OneBot 接收器",
         WARN,
         f"监听 {where}，未设置上报 token",
-        "设置 QQ_DIGEST_ONEBOT_TOKEN，否则本机任意进程都能伪造群消息",
+        "仅本机监听时可接受，但本机任意进程都能伪造群消息；对外监听必须先设 token",
     )
 
 
@@ -369,11 +377,13 @@ def check_web(ctx: DoctorContext) -> Check:
     host = str(settings.web_host or "")
     exposed = not _is_loopback(host)
     if exposed and not token:
+        # v0.4.1 起无论监听哪里都会在启动时自动生成 token 并落库，所以这不是"无鉴权"，
+        # FAIL 只留给真正出错的状态；这里提示对外部署把 token 固定下来。
         return Check(
             "待办台",
-            FAIL,
-            f"监听 {host}:{settings.web_port} 且未设置访问 token",
-            "设置 QQ_DIGEST_WEB_TOKEN（或把 QQ_DIGEST_WEB_HOST 改回 127.0.0.1）",
+            WARN,
+            f"监听 {host}:{settings.web_port}，未显式设置访问 token（启动时会自动生成并存本地库）",
+            "对外部署建议用 QQ_DIGEST_WEB_TOKEN 固定一个 token，当前值可用 python main.py tasks 查看",
         )
     url = f"http://{_health_host(host)}:{settings.web_port}/api/health"
     try:
@@ -393,15 +403,16 @@ def check_access(ctx: DoctorContext) -> Check:
     onebot_exposed = not _is_loopback(settings.onebot_host)
     web_exposed = not _is_loopback(settings.web_host)
 
+    onebot_note = "（对外监听，建议改回 127.0.0.1）" if onebot_exposed else "（仅本机）"
+    if not web_exposed:
+        web_note = "（仅本机）"
+    elif token:
+        web_note = "（对外监听，有 token）"
+    else:
+        web_note = "（对外监听，token 启动时自动生成，建议显式固定）"
     parts = [
-        f"OneBot {settings.onebot_host}:{settings.onebot_port}"
-        + ("（对外监听，建议改回 127.0.0.1）" if onebot_exposed else "（仅本机）"),
-        f"待办台 {settings.web_host}:{settings.web_port}"
-        + (
-            ("（对外监听，" + ("有 token）" if token else "无 token！）"))
-            if web_exposed
-            else "（仅本机）"
-        ),
+        f"OneBot {settings.onebot_host}:{settings.onebot_port}" + onebot_note,
+        f"待办台 {settings.web_host}:{settings.web_port}" + web_note,
     ]
     detail = "；".join(parts)
 
@@ -409,7 +420,7 @@ def check_access(ctx: DoctorContext) -> Check:
     if onebot_exposed:
         problems.append("OneBot 不应对外监听")
     if web_exposed and not token:
-        problems.append("待办台对外且无 token")
+        problems.append("待办台对外且未显式设 token（启动时会自动生成）")
     if onebot_exposed or web_exposed:
         hint = "对外监听只应在私有网络（如 Tailscale）内访问，不要直接映射公网端口"
     else:

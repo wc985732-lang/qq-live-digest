@@ -38,6 +38,9 @@
 - 收敛重复实现：新增 `qq_live_digest/redact.py`（`observe.mask_id` 与 `doctor._mask_id` 共用）、
   `qq_live_digest/taskstatus.py`（状态口径）、`restapi.clamp_int`（`mcp._int_arg` / `webapp._query_int`
   共用）；REST 的 `importance` / `id` 解析改为防御式，坏参数不再 500。
+- 让 `doctor` 的口径与本次政策对齐：「待办台」对外监听但未显式配 token 由 FAIL 降为 WARN
+  （启动时总会自动生成 token，运行期并非无鉴权）；「OneBot 接收器」对外监听且无 token
+  由 WARN 升为 FAIL（按新政策接收器会直接拒绝启动，等于收不到任何群消息）。
 
 ### 破坏性 / 迁移
 - **待办台现在总是需要 token**：过去 `QQ_DIGEST_WEB_HOST` 是回环地址且未设 `QQ_DIGEST_WEB_TOKEN`
@@ -46,6 +49,8 @@
 - **OneBot 未设 token 时不再监听非回环地址**：`QQ_DIGEST_ONEBOT_HOST` 不是 `127.0.0.1` /
   `localhost` / `::1` 且 `QQ_DIGEST_ONEBOT_TOKEN` 为空时，接收器会拒绝启动；请补 token，或改回
   只监听回环。
+- **`doctor` 的状态级别有调整**（如上「修复」所述）：待办台对外 + 未显式配 token 不再算 FAIL，
+  OneBot 对外 + 无 token 改为 FAIL；若有脚本依赖 `doctor` 的退出码，请相应调整。
 
 ## [0.4.0] - 2026-10-09
 

@@ -196,9 +196,10 @@ class UnconfiguredEnvironmentTest(DoctorFixture):
         # 未配置 LLM 只是提醒，不是错误
         self.assertEqual(names["大模型"].status, WARN)
 
-    def test_web_exposed_without_token_is_fail(self) -> None:
+    def test_web_exposed_without_token_is_warn(self) -> None:
+        # 服务启动时总会自动生成 token，因此这不是"无鉴权"，只提醒对外部署固定 token。
         settings = _settings(web_host="0.0.0.0", web_token="")
-        self.assertEqual(check_web(self.context(settings)).status, FAIL)
+        self.assertEqual(check_web(self.context(settings)).status, WARN)
 
     def test_web_exposed_with_store_token_passes(self) -> None:
         self.store.meta_set("web_token", WEB_TOKEN)
@@ -250,6 +251,11 @@ class ComponentCheckTest(DoctorFixture):
 
     def test_onebot_without_token_is_warn(self) -> None:
         self.assertEqual(check_onebot(self.context(_settings(onebot_token=""))).status, WARN)
+
+    def test_onebot_exposed_without_token_is_fail(self) -> None:
+        # v0.4.1 起非回环 + 无 token 时接收器拒绝启动，等于收不到消息，必须 FAIL。
+        exposed = _settings(onebot_token="", onebot_host="0.0.0.0")
+        self.assertEqual(check_onebot(self.context(exposed)).status, FAIL)
 
     def test_onebot_disabled_is_ok(self) -> None:
         self.assertEqual(check_onebot(self.context(_settings(onebot_enabled=False))).status, OK)
