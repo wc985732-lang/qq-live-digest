@@ -179,6 +179,11 @@ def _overlap(left: Any, right: Any) -> bool:
     return bool(union) and shared / union >= JACCARD_THRESHOLD
 
 
+def _has_structured_anchor(parts: Mapping[str, Any]) -> bool:
+    """是否有日期 / 来源 / 截止这类硬锚点——只有它们才足以支撑「同一件事」的判断。"""
+    return bool(parts.get("deadline") or parts.get("time") or parts.get("source"))
+
+
 def compatible(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
     """两个五要素是否指向同一个事件（判据可解释、无副作用）。"""
     for field in ("action", "deadline"):
@@ -191,7 +196,13 @@ def compatible(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
             # 来源允许「学院」与「学院教务处」这类包含关系
             if field != "source" or not any(x in y or y in x for x in a for y in b):
                 return False
-    return _overlap(left.get("objects"), right.get("objects"))
+    if not _overlap(left.get("objects"), right.get("objects")):
+        return False
+    if _has_structured_anchor(left) or _has_structured_anchor(right):
+        return True
+    # 双方都没有日期/来源/截止锚点：只靠双字词重叠太容易误合，要求更强的对象重合
+    shared = set(left.get("objects") or ()) & set(right.get("objects") or ())
+    return len(shared) >= MIN_SHARED_GRAMS + 1
 
 
 def describe(item: Mapping[str, Any]) -> str:

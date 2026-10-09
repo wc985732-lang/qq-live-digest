@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import json
 import logging
 import secrets
@@ -16,6 +17,7 @@ from . import conflicts
 from . import ics
 from . import observe
 from . import restapi
+from . import taskstatus
 from .config import Settings
 from .store import Store
 from .timeutil import iso, now_local, parse_iso
@@ -264,7 +266,13 @@ body.offline-mode{padding-top:40px}
 <script>
 var KEY = 'qq_digest_token';
 var params = new URLSearchParams(location.search);
-if (params.get('token')) localStorage.setItem(KEY, params.get('token'));
+if (params.get('token')) {
+  localStorage.setItem(KEY, params.get('token'));
+  // 别把 token 留在地址栏 / 历史记录 / Referer 里，只存在 localStorage
+  params.delete('token');
+  var rest = params.toString();
+  history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
+}
 var token = localStorage.getItem(KEY) || '';
 
 var canRunSW = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
@@ -782,10 +790,19 @@ class _Handler(BaseHTTPRequestHandler):
         token = str(getattr(self.server, "token", "") or "")
         if not token:
             return True
+        expected = token.encode("utf-8")
         params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        if token in params.get("token", []):
-            return True
-        return self.headers.get("X-Token", "") == token
+        supplied = list(params.get("token", [])) + [self.headers.get("X-Token", "")]
+        # 恒定时间比较，避免按字符逐位泄露 token
+        return any(hmac.compare_digest(str(item).encode("utf-8"), expected) for item in supplied)
+
+    def _cross_site(self) -> bool:
+        """浏览器跨站 POST 会带 Origin；与 Host 不一致（含 `null`）即判为跨站，防 CSRF。"""
+        origin = str(self.headers.get("Origin") or "").strip()
+        if not origin:
+            return False
+        host = str(self.headers.get("Host") or "").strip().lower()
+        return urllib.parse.urlparse(origin).netloc.lower() != host
 
     @property
     def store(self) -> Store:
@@ -795,11 +812,8 @@ class _Handler(BaseHTTPRequestHandler):
         return urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
 
     def _query_int(self, name: str, default: int, low: int, high: int) -> int:
-        try:
-            value = int((self._query().get(name) or [str(default)])[0])
-        except (TypeError, ValueError):
-            value = default
-        return max(low, min(high, value))
+        raw = (self._query().get(name) or [str(default)])[0]
+        return restapi.clamp_int(raw, default, low, high)
 
     def _query_flag(self, name: str) -> bool:
         value = str((self._query().get(name) or [""])[0]).strip().lower()
@@ -845,10 +859,11 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/calendar.ics":
+            include_done = self._query_flag("include_done")
             body = ics.build_calendar(
-                self.store.list_tasks(),
+                self.store.list_tasks(statuses=taskstatus.statuses_for(include_done)),
                 now=now_local(),
-                include_done=self._query_flag("include_done"),
+                include_done=include_done,
             )
             raw = body.encode("utf-8")
             self.send_response(200)
@@ -860,13 +875,14 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(raw)
             return
         if path == "/api/conflicts":
+            include_done = self._query_flag("include_done")
             self._json(
                 200,
                 conflicts.payload(
-                    self.store.list_tasks(),
+                    self.store.list_tasks(statuses=taskstatus.statuses_for(include_done)),
                     now=now_local(),
                     window_minutes=self._query_int("window", conflicts.DEFAULT_WINDOW_MINUTES, 0, 1440),
-                    include_done=self._query_flag("include_done"),
+                    include_done=include_done,
                 ),
             )
             return
@@ -937,6 +953,9 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._json(401, {"ok": False, "error": "invalid token"})
             return
+        if self._cross_site():
+            self._json(403, {"ok": False, "error": "cross-site request blocked"})
+            return
         path = urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
         if not path.startswith("/api/tasks/"):
             self._json(404, {"ok": False, "error": "not found"})
@@ -946,7 +965,11 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._json(400, {"ok": False, "error": "bad task id"})
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            self._json(400, {"ok": False, "error": "bad content length"})
+            return
         if length < 0 or length > MAX_BODY_BYTES:
             self._json(400, {"ok": False, "error": "bad body"})
             return
@@ -1009,7 +1032,8 @@ class TaskWebServer:
         self.server: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self.token = settings.web_token or store.meta_get("web_token", "")
-        if not self.token and settings.web_host not in {"127.0.0.1", "localhost", "::1"}:
+        if not self.token:
+            # 无论监听回环还是对外，都自动生成 token 并落库：绑定回环反而免鉴权是安全边界反转。
             self.token = secrets.token_urlsafe(12)
             store.meta_set("web_token", self.token)
 

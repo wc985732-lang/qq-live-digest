@@ -66,7 +66,7 @@ TOOLS: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "search_messages",
-        "description": "按关键词搜历史群消息（只读；本地库，不含发送者 ID）。",
+        "description": "按关键词搜历史群消息（只读；本地库，只给发送者显示名，不含 QQ 号）。",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -157,11 +157,8 @@ def list_tools() -> list[dict[str, Any]]:
 
 
 def _int_arg(args: dict[str, Any], name: str, default: int, low: int, high: int) -> int:
-    try:
-        value = int(args.get(name, default))
-    except (TypeError, ValueError):
-        value = default
-    return max(low, min(high, value))
+    """读一个受限整数参数；限幅逻辑与 HTTP 层共用一份（restapi.clamp_int）。"""
+    return restapi.clamp_int(args.get(name, default), default, low, high)
 
 
 def _bool_arg(args: dict[str, Any], name: str, default: bool = False) -> bool:
@@ -298,7 +295,9 @@ _HANDLERS: dict[str, Callable[[Any, dict[str, Any]], dict[str, Any]]] = {
 
 def call_tool(store: Any, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """执行一个 Tool（只读或可写），返回 MCP 的 tools/call 结果结构。"""
-    handler = _HANDLERS[str(name or "")]
+    handler = _HANDLERS.get(str(name or ""))
+    if handler is None:
+        return _tool_result({"ok": False, "error": f"未知 Tool: {name or '(空)'}"}, is_error=True)
     try:
         payload = handler(store, dict(arguments or {}))
     except ValueError as error:

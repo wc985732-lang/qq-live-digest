@@ -23,6 +23,7 @@ from typing import Any
 
 from . import decisions as decisions_mod
 from . import llmstats
+from . import redact
 from .timeutil import iso, now_local
 
 #: 预设视图（天）：1 天 = 按日、7 天 = 按周、30 天 = 按月
@@ -49,12 +50,7 @@ def view_label(days: int) -> str:
 
 def mask_id(value: Any) -> str:
     """群号脱敏：只保留首尾各 2 位（与 doctor 同一规则）。"""
-    text = str(value or "")
-    if not text:
-        return "（无群号）"
-    if len(text) <= 4:
-        return "*" * len(text)
-    return f"{text[:2]}***{text[-2:]}"
+    return redact.mask_id(value, empty="（无群号）")
 
 
 def rate(part: int, whole: int) -> float:

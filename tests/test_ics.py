@@ -60,6 +60,12 @@ class TextTest(unittest.TestCase):
             self.assertLessEqual(len(body.encode("utf-8")), ics.MAX_LINE_OCTETS)
         self.assertEqual(folded.replace("\r\n ", ""), line)
 
+    def test_fold_line_continuations_fit_75_with_leading_space(self) -> None:
+        folded = ics.fold_line("DESCRIPTION:" + "中" * 200)
+        for index, segment in enumerate(folded.split("\r\n")):
+            full = segment if index == 0 else " " + segment
+            self.assertLessEqual(len(full.encode("utf-8")), ics.MAX_LINE_OCTETS)
+
 
 class EventTest(unittest.TestCase):
     def test_skips_tasks_without_deadline(self) -> None:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Iterable
 
+from . import taskstatus
 from .timeutil import iso, now_local, parse_iso
 
 DEFAULT_WINDOW_MINUTES = 30
@@ -30,7 +31,7 @@ def _item(task: dict[str, Any]) -> dict[str, Any]:
         "category": str(task.get("category") or "info"),
         "deadline": iso(parse_iso(task.get("deadline"))),
         "groups": [str(name) for name in (task.get("groups") or [])],
-        "done": bool(task.get("done")),
+        "done": taskstatus.is_done(task),
     }
 
 
@@ -44,8 +45,9 @@ def conflict_groups(
     window = max(0, int(window_minutes if window_minutes is not None else DEFAULT_WINDOW_MINUTES))
     dated: list[tuple[dt.datetime, dict[str, Any]]] = []
     for task in tasks:
-        done = bool(task.get("done"))
-        if done and not include_done:
+        if taskstatus.is_archived(task):
+            continue
+        if taskstatus.is_done(task) and not include_done:
             continue
         moment = parse_iso(task.get("deadline"))
         if moment is None:
