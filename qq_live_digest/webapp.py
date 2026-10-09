@@ -59,17 +59,31 @@ ICON_SVG = """<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\">
   <path d=\"M168 264l58 58 122-142\" fill=\"none\" stroke=\"#fff\" stroke-width=\"36\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>
 </svg>"""
 
-SERVICE_WORKER_JS = """const CACHE = 'qq-digest-shell-v6';
+SERVICE_WORKER_JS = """const CACHE = 'qq-digest-shell-v7';
+const DATA = 'qq-digest-data-v7';
 const ASSETS = ['/manifest.webmanifest', '/icon.svg'];
+// 只读数据接口：网络优先，成功就留一份，断网时回放最后一次（离线只读）
+const DATA_PATHS = ['/api/tasks', '/api/notices', '/api/notifications', '/api/deadlines', '/api/meta'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', event => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim()));
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE && key !== DATA).map(key => caches.delete(key)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+  if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (DATA_PATHS.includes(url.pathname)) {
+    event.respondWith(fetch(event.request).then(response => {
+      if (response.ok) {
+        const copy = response.clone();
+        caches.open(DATA).then(cache => cache.put(event.request, copy));
+      }
+      return response;
+    }).catch(() => caches.match(event.request)));
+    return;
+  }
+  if (url.pathname.startsWith('/api/')) return;
   event.respondWith(fetch(event.request).then(response => {
     if (response.ok && (url.pathname === '/' || ASSETS.includes(url.pathname))) {
       const copy = response.clone();
@@ -202,9 +216,14 @@ details p{margin:7px 0 0;font-size:12px;line-height:1.6;color:var(--muted);borde
 .kv span:last-child{color:var(--muted);text-align:right}
 .insight-list{margin:6px 0 0;padding:0 0 0 16px;list-style:disc}
 .insight-list li{margin:6px 0;font-size:12px;line-height:1.5;color:var(--muted)}
+.offline{position:fixed;top:0;left:0;right:0;z-index:20;padding:9px 14px;background:#3a2a12;color:#ffcf7a;font-size:13px;text-align:center;border-bottom:1px solid rgba(255,255,255,.08)}
+.install-btn{position:fixed;right:12px;bottom:78px;z-index:19;padding:10px 15px;border-radius:14px;border:1px solid var(--line-strong);background:var(--grad);color:#fff;font-size:13px;font-weight:600;box-shadow:0 8px 22px rgba(0,0,0,.35)}
+body.offline-mode{padding-top:40px}
 </style>
 </head>
 <body>
+<div id="offline" class="offline" role="status" hidden>离线：只读缓存，写操作已禁用</div>
+<button id="install" class="install-btn" type="button" hidden>安装到桌面</button>
 <header>
   <div class="hero">
     <div class="hero-top">
@@ -248,11 +267,44 @@ var params = new URLSearchParams(location.search);
 if (params.get('token')) localStorage.setItem(KEY, params.get('token'));
 var token = localStorage.getItem(KEY) || '';
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
+var canRunSW = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+if ('serviceWorker' in navigator && canRunSW) {
   window.addEventListener('load', function () {
     navigator.serviceWorker.register('/sw.js').catch(function () {});
   });
 }
+
+// 离线只读：断网时页面读缓存、写操作直接拦下
+var offlineBanner = document.getElementById('offline');
+function setOnline(state) {
+  document.body.classList.toggle('offline-mode', !state);
+  if (offlineBanner) offlineBanner.hidden = state;
+}
+setOnline(navigator.onLine !== false);
+window.addEventListener('online', function () { setOnline(true); loadTasks(); });
+window.addEventListener('offline', function () { setOnline(false); });
+function isOffline() { return navigator.onLine === false; }
+
+// 安装引导：支持时显示按钮，点了调起浏览器安装
+var installBtn = document.getElementById('install');
+var deferredInstall = null;
+window.addEventListener('beforeinstallprompt', function (event) {
+  event.preventDefault();
+  deferredInstall = event;
+  if (installBtn) installBtn.hidden = false;
+});
+if (installBtn) {
+  installBtn.onclick = function () {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    deferredInstall = null;
+    installBtn.hidden = true;
+  };
+}
+window.addEventListener('appinstalled', function () {
+  deferredInstall = null;
+  if (installBtn) installBtn.hidden = true;
+});
 
 function api(path, options) {
   options = options || {};
@@ -467,6 +519,7 @@ function render(data) {
 }
 
 function sendAction(task, action) {
+  if (isOffline()) { alert('离线状态：只读缓存，暂不能修改；连上网再试。'); return; }
   api('/api/tasks/' + task.id, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -475,6 +528,7 @@ function sendAction(task, action) {
 }
 
 function sendCorrection(task, correction, value) {
+  if (isOffline()) { alert('离线状态：只读缓存，暂不能纠错；连上网再试。'); return; }
   api('/api/tasks/' + task.id, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},

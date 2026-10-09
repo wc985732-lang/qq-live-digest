@@ -473,7 +473,8 @@ QQ_DIGEST_WEEKLY_REVIEW_TIME=20:30
 `tailscale serve --bg 8766`，把本机待办台暴露为带 HTTPS 的 tailnet 地址。
 把该地址写入 `QQ_DIGEST_WEB_BASE_URL` 后，推送里的确认链接会稳定指向 Tailscale，
 不会再去猜测局域网 IP。页面支持 manifest 和 service worker，可以从手机浏览器
-添加到桌面，作为轻量 PWA 使用。
+添加到桌面，作为轻量 PWA 使用；装好后即使**断网也能打开**，回放最近一次的通知 / 待办（离线只读），
+写操作会先提示连网。
 
 ## 群文件与图片（AI 读取）
 
