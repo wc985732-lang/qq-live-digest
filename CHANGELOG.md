@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 文档 / 演示
+- 演示片 `docs/demo/demo.gif` 与 `demo.mp4` 重渲染：配色换成跟待办台同一套深色 token
+  （`--bg #0E1117` / `--card #171C25` / `--accent-soft #4C82FF` / `--action #F0A63C`），
+  不再沿用旧的 GitHub-dark 蓝紫（面板 `#161B22`、强调色 `#58A6FF`）。片子里的数字同步刷成
+  当前逻辑的真值（500 条消息 → 67 条要点 → 30 次通知 → 62 项待办），README / `docs/DEMO.md`
+  的说明与体积一并更新。
+- 配色收成单一来源 `qq_live_digest/theme.py`：待办台页面 CSS 与演示片调色板都从它取色，
+  避免「改一处漏一处」；PWA 图标 `<rect>` 底色改成与 manifest `theme_color` 一致的 `#0E1117`。
+
 ## [0.5.0] - 2026-10-10
 
 ### 界面

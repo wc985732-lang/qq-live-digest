@@ -18,6 +18,7 @@ from . import ics
 from . import observe
 from . import restapi
 from . import taskstatus
+from . import theme
 from .config import Settings
 from .store import Store
 from .timeutil import iso, now_local, parse_iso
@@ -56,7 +57,7 @@ ICON_SVG = """<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\">
       <stop offset=\"1\" stop-color=\"#8b5cf6\"/>
     </linearGradient>
   </defs>
-  <rect width=\"512\" height=\"512\" rx=\"112\" fill=\"#0b0d12\"/>
+  <rect width=\"512\" height=\"512\" rx=\"112\" fill=\"#0E1117\"/>
   <rect x=\"64\" y=\"64\" width=\"384\" height=\"384\" rx=\"96\" fill=\"url(#g)\"/>
   <path d=\"M168 264l58 58 122-142\" fill=\"none\" stroke=\"#fff\" stroke-width=\"36\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>
 </svg>"""
@@ -144,37 +145,11 @@ PAGE_HTML = """<!doctype html>
 <title>群消息待办</title>
 <style>
 :root{
-  --bg:#0E1117;--bg-top:#151A23;--glass-1:rgba(14,17,23,.94);--glass-2:rgba(14,17,23,.78);
-  --card:#171C25;--card-2:#202733;--line:#2A313D;--line-strong:#3A4351;
-  --text:#E9EDF4;--muted:#A6B0C0;--dim:#8A94A2;
-  --accent:#3A6BE0;--accent-ink:#FFFFFF;--accent-soft:#4C82FF;
-  --urgent-soft:#FF6B72;--urgent-ink:#FFB3B7;
-  --action:#F0A63C;--action-ink:#FFC87C;--academic:#4C82FF;--academic-ink:#9CBBFF;--info:#8E99A8;
-  --tint-urgent:rgba(255,107,114,.13);--line-urgent:rgba(255,107,114,.30);
-  --tint-action:rgba(240,166,60,.13);--line-action:rgba(240,166,60,.30);
-  --tint-academic:rgba(76,130,255,.15);--line-academic:rgba(76,130,255,.32);
-  --hero-1:#1B2536;--hero-2:#171D28;--hero-3:#151A23;--overdue-1:rgba(255,107,114,.12);
-  --shadow:rgba(0,0,0,.40);--bar:rgba(255,255,255,.08);--check-line:#4A5464;
-  --nav-bg:rgba(23,28,37,.88);--nav-active:linear-gradient(135deg,rgba(58,107,224,.95),rgba(58,107,224,.55));
-  --offline-bg:#3A2A12;--offline-ink:#FFCF7A;
-  color-scheme:dark;
+__THEME_DARK__
 }
 /* 浅色主题只覆盖同名 token，其余规则不动；JS 在 head 里按 跟随系统/浅色/深色 设置 data-theme */
 [data-theme="light"]{
-  --bg:#F5F7FA;--bg-top:#FFFFFF;--glass-1:rgba(255,255,255,.95);--glass-2:rgba(255,255,255,.82);
-  --card:#FFFFFF;--card-2:#F1F4F8;--line:#E3E7ED;--line-strong:#C9D1DC;
-  --text:#191D24;--muted:#5B6472;--dim:#666F80;
-  --accent:#2F6BE0;--accent-ink:#FFFFFF;--accent-soft:#2F6BE0;
-  --urgent-soft:#D93A42;--urgent-ink:#B32B33;
-  --action:#B87514;--action-ink:#8F5A0A;--academic:#2F6BE0;--academic-ink:#2A5FCB;--info:#6B7585;
-  --tint-urgent:rgba(217,58,66,.08);--line-urgent:rgba(217,58,66,.22);
-  --tint-action:rgba(184,117,20,.10);--line-action:rgba(184,117,20,.24);
-  --tint-academic:rgba(47,107,224,.10);--line-academic:rgba(47,107,224,.26);
-  --hero-1:#EDF2FE;--hero-2:#F7F9FC;--hero-3:#FFFFFF;--overdue-1:rgba(217,58,66,.07);
-  --shadow:rgba(23,32,54,.10);--bar:rgba(25,29,36,.08);--check-line:#B9C2CE;
-  --nav-bg:rgba(255,255,255,.92);--nav-active:linear-gradient(135deg,#DCE7FF,#EAF0FF);
-  --offline-bg:#FDF3E0;--offline-ink:#8A5A10;
-  color-scheme:light;
+__THEME_LIGHT__
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html{width:100%;max-width:100%;overflow-x:clip;background:var(--bg)}
@@ -743,6 +718,10 @@ setInterval(loadTasks, 60000);
 </body>
 </html>
 """
+# 两套配色的唯一来源是 theme.py：这里只负责把它拼进 CSS 变量块，避免两边各写一份而漂移
+PAGE_HTML = PAGE_HTML.replace("__THEME_DARK__", theme.css_block("dark")).replace(
+    "__THEME_LIGHT__", theme.css_block("light")
+)
 
 
 def _deadline_label(value: dt.datetime | None, now: dt.datetime) -> tuple[str, bool]:

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import decisions, simulator
+from . import decisions, simulator, theme
 
 LOGGER = logging.getLogger(__name__)
 
@@ -31,15 +31,17 @@ WIDTH = 880
 HEIGHT = 496
 FPS = 8
 
-BG = (14, 17, 22)
-PANEL = (22, 27, 34)
-BORDER = (48, 54, 61)
-FG = (230, 237, 243)
-MUTED = (139, 148, 158)
-ACCENT = (88, 166, 255)
+# 配色跟待办台同一份来源（theme.py 的深色 token）：改了主题，片子跟着变，不会两边各走各的
+BG = theme.hex_rgb("--bg")
+PANEL = theme.hex_rgb("--card")
+BORDER = theme.hex_rgb("--line")
+FG = theme.hex_rgb("--text")
+MUTED = theme.hex_rgb("--muted")
+ACCENT = theme.hex_rgb("--accent-soft")
+WARN = theme.hex_rgb("--action")
+INK = theme.hex_rgb("--bg")  # 压在彩色进度条上的数字，要跟底色一样深才压得住
+# 界面没有「成功/保留」这一档色相，而漏斗需要它把「要点」和「原始消息/通知」分开，所以只留在片子里
 GOOD = (63, 185, 80)
-WARN = (210, 153, 34)
-INK = (10, 12, 16)
 
 # 场景时长（秒）：加起来就是片长，控制在 20–30 秒
 SCENES: tuple[tuple[str, float], ...] = (
