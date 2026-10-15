@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import http.cookiejar
 import json
 import sys
 import tempfile
@@ -173,6 +174,16 @@ class TaskApiTest(unittest.TestCase):
             body = response.read().decode("utf-8")
         self.assertIn("群消息待办", body)
         self.assertIn("/api/tasks", body)
+
+    def test_path_login_sets_cookie(self) -> None:
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        with opener.open(f"{self.base}/login/secret", timeout=5) as response:
+            body = response.read().decode("utf-8")
+            self.assertIn("群消息待办", body)
+        with opener.open(f"{self.base}/api/tasks", timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        self.assertIn("today", data)
 
     def test_card_toggles_have_mobile_tap_targets(self) -> None:
         self.assertIn("details:not(.section)>summary{", PAGE_HTML)

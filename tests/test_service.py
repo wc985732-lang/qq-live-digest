@@ -115,7 +115,7 @@ class ServiceTest(unittest.TestCase):
         service = DigestService(settings, store=store, bot=self.bot, pushers=[self.pusher])
         self.assertEqual(
             service._task_url(7),
-            "https://qq-digest.tailnet.ts.net/?token=secret#task-7",
+            "https://qq-digest.tailnet.ts.net/login/secret#task-7",
         )
 
     def test_window_flush_pushes_focus_items_once(self) -> None:

@@ -543,10 +543,10 @@ class Store:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def llm_call_summary(self, *, hours: int = 24) -> dict[str, int]:
+    def llm_call_summary(self, *, hours: int = 24, now: Any = None) -> dict[str, int]:
         """最近 N 小时的用量小结（调用数 / 失败 / token / 耗时），供 doctor 一眼看。"""
         window = max(1, int(hours))
-        cutoff = iso(now_local() - dt.timedelta(hours=window))
+        cutoff = iso((now or now_local()) - dt.timedelta(hours=window))
         with self._connect() as connection:
             row = connection.execute(
                 """

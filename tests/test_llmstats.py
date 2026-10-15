@@ -243,7 +243,7 @@ class StoreUsageTest(unittest.TestCase):
             LLMCall(status=llmstats.STATUS_SKIPPED, attempts=0, fallback=True, error="未配置密钥"),
             created_at=NOW,
         )
-        summary = self.store.llm_call_summary(hours=24)
+        summary = self.store.llm_call_summary(hours=24, now=NOW)
         self.assertEqual(summary["calls"], 3)
         self.assertEqual(summary["failed"], 1)
         self.assertEqual(summary["skipped"], 1)

@@ -33,9 +33,10 @@ def build_web_url(
             host = detect_lan_ip()
         base = f"http://{host}:{settings.web_port}"
 
-    url = base + "/"
     if token:
-        url += "?" + urllib.parse.urlencode({"token": token})
+        url = base + "/login/" + urllib.parse.quote(str(token), safe="")
+    else:
+        url = base + "/"
     if task_id is not None:
         url += f"#task-{int(task_id)}"
     return url

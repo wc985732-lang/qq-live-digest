@@ -883,11 +883,38 @@ class _Handler(BaseHTTPRequestHandler):
         token = str(getattr(self.server, "token", "") or "")
         if not token:
             return True
-        expected = token.encode("utf-8")
         params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        supplied = list(params.get("token", [])) + [self.headers.get("X-Token", "")]
+        cookie_token = ""
+        cookie_header = str(self.headers.get("Cookie") or "")
+        for part in cookie_header.split(";"):
+            name, separator, value = part.strip().partition("=")
+            if separator and name == "qq_digest_token":
+                cookie_token = urllib.parse.unquote(value)
+                break
+        supplied = list(params.get("token", [])) + [
+            self.headers.get("X-Token", ""),
+            cookie_token,
+        ]
         # 恒定时间比较，避免按字符逐位泄露 token
-        return any(hmac.compare_digest(str(item).encode("utf-8"), expected) for item in supplied)
+        return any(self._token_matches(str(item), token) for item in supplied)
+
+    @staticmethod
+    def _token_matches(supplied: str, expected: str) -> bool:
+        if not supplied or not expected:
+            return False
+        return hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+
+    def _set_login_cookie(self, token: str) -> None:
+        self.send_response(303)
+        self.send_header(
+            "Set-Cookie",
+            "qq_digest_token=%s; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax"
+            % urllib.parse.quote(token, safe=""),
+        )
+        self.send_header("Location", "/")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _cross_site(self) -> bool:
         """浏览器跨站 POST 会带 Origin；与 Host 不一致（含 `null`）即判为跨站，防 CSRF。"""
@@ -925,6 +952,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path == "/sw.js":
             self._asset(SERVICE_WORKER_JS, "text/javascript; charset=utf-8")
+            return
+        if path.startswith("/login/") or path.startswith("/t/"):
+            supplied = urllib.parse.unquote(path.split("/", 2)[2])
+            if not self._token_matches(supplied, str(getattr(self.server, "token", "") or "")):
+                self._json(401, {"ok": False, "error": "invalid token"})
+                return
+            self._set_login_cookie(supplied)
             return
         if not self._authorized():
             self._json(401, {"ok": False, "error": "invalid token"})
